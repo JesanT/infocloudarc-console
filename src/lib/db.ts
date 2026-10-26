@@ -111,8 +111,15 @@ async function createPgliteSql(): Promise<Sql> {
   // replaces this with Postgres and never opens this directory.
   globalRef.__pgliteInstance__ ??= (async () => {
     const { mkdirSync } = await import("node:fs");
+    const { createRequire } = await import("node:module");
     const { join } = await import("node:path");
-    const { PGlite } = await import("@electric-sql/pglite");
+    const { pathToFileURL } = await import("node:url");
+    // Load the package from node_modules. Bundling it makes Node look for
+    // pglite.data next to the server chunk, which is not copied, and the
+    // production server exits.
+    const require = createRequire(join(process.cwd(), "package.json"));
+    const entry = require.resolve("@electric-sql/pglite");
+    const { PGlite } = (await import(pathToFileURL(entry).href)) as typeof import("@electric-sql/pglite");
     const dataDir = join(process.cwd(), "data", "pglite");
     mkdirSync(dataDir, { recursive: true });
     const pg = new PGlite({
@@ -238,6 +245,5 @@ if (typeof window === "undefined" && dbSource === "pglite") {
   globalBoot.__pgBootstrapPromise__ ??= ensureDbReady().catch((err) => {
     globalBoot.__pgBootstrapPromise__ = undefined;
     console.error("[db] PGLite bootstrap failed:", err);
-    throw err;
   });
 }
