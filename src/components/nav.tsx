@@ -41,6 +41,7 @@ const NAV: NavNode[] = [
     icon: Server,
     items: [
       { id: "services", label: "Services", icon: Server },
+      { id: "applications", label: "Applications", icon: AppWindow },
       { id: "databases", label: "Databases", icon: Database },
       { id: "loadbalancers", label: "Load balancers", icon: Scale },
       { id: "clusters", label: "Clusters", icon: Boxes },

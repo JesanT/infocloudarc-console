@@ -1,17 +1,21 @@
 import { useEffect, useState } from "react";
 
-type Point = { label: string; a: number; b: number };
+type Point = { label: string; a: number | null; b: number | null };
 
 export function Trend({
   data,
   aLabel,
   bLabel,
   className = "h-28",
+  interval,
+  domain,
 }: {
   data: Point[];
   aLabel: string;
   bLabel: string;
   className?: string;
+  interval?: number;
+  domain?: [number, number];
 }) {
   const [lib, setLib] = useState<typeof import("recharts") | null>(null);
 
@@ -34,8 +38,8 @@ export function Trend({
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid stroke="var(--color-line)" vertical={false} />
-          <XAxis dataKey="label" tick={{ fill: "var(--color-faint)", fontSize: 12 }} axisLine={false} tickLine={false} />
-          <YAxis tick={{ fill: "var(--color-faint)", fontSize: 12 }} axisLine={false} tickLine={false} width={32} />
+          <XAxis dataKey="label" interval={interval} tick={{ fill: "var(--color-faint)", fontSize: 12 }} axisLine={false} tickLine={false} />
+          <YAxis domain={domain} tick={{ fill: "var(--color-faint)", fontSize: 12 }} axisLine={false} tickLine={false} width={32} />
           <Tooltip
             contentStyle={{
               background: "var(--color-panel)",

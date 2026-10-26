@@ -1,12 +1,15 @@
 import { create } from "zustand";
 import type { SiteKey } from "@/lib/cloud/model";
 import { ROLE_LABEL, canMutateSite, siteLabel } from "@/lib/cloud/model";
+import { observeOwner } from "@/lib/cloud/hyperv";
 import { useCloud } from "@/lib/cloud/store";
 
 export type FailoverMode = "auto" | "manual";
 export type AppKind = "tomcat" | "iis" | "other";
 export type DbKind = "mssql" | "mysql" | "mongodb" | "postgresql" | "other";
 export type Health = "Healthy" | "Warning" | "Degraded" | "Critical" | "Offline";
+
+export type OwnerSource = "cluster" | "mac" | "unconfirmed";
 
 export type DrService = {
   id: string;
@@ -19,6 +22,10 @@ export type DrService = {
   rpo: string;
   rto: string;
   owner: string;
+  serviceIp: string;
+  ownerVmId: string | null;
+  ownerSource: OwnerSource;
+  ownerCheckedAt: string;
 };
 
 export type DrHost = {
@@ -42,6 +49,7 @@ export type DrVm = {
   cpu: number;
   mem: number;
   ip: string;
+  mac: string;
 };
 
 export type DrCluster = {
@@ -107,7 +115,7 @@ export const DB_LABEL: Record<DbKind | "all", string> = {
   all: "All databases",
 };
 
-const SERVICES: DrService[] = [
+const SERVICES: Array<Omit<DrService, "serviceIp" | "ownerVmId" | "ownerSource" | "ownerCheckedAt">> = [
   { id: "svc-checkout", name: "checkout-api", site: "east", standbySite: "west", tier: "Gold", status: "Healthy", mode: "auto", rpo: "1 min", rto: "5 min", owner: "Commerce" },
   { id: "svc-portal", name: "intranet-portal", site: "east", standbySite: "central", tier: "Silver", status: "Healthy", mode: "manual", rpo: "1 h", rto: "30 min", owner: "Workplace" },
   { id: "svc-billing", name: "billing-core", site: "west", standbySite: "central", tier: "Gold", status: "Warning", mode: "manual", rpo: "5 min", rto: "10 min", owner: "Finance" },
@@ -135,7 +143,7 @@ const CLUSTERS: DrCluster[] = [
   { id: "cl-central-db", name: "central-db", site: "central", kind: "Database", nodes: 2, status: "Healthy" },
 ];
 
-const VMS: DrVm[] = [
+const VMS: Array<Omit<DrVm, "mac">> = [
   { id: "vm-chk-e", name: "vm-checkout-e", hostId: "ph-e-01", clusterId: "cl-east-app", site: "east", status: "running", cpu: 36, mem: 48, ip: "10.10.1.41" },
   { id: "vm-chk-w", name: "vm-checkout-w", hostId: "ph-w-01", clusterId: "cl-west-app", site: "west", status: "running", cpu: 12, mem: 30, ip: "10.20.2.41" },
   { id: "vm-pg-e", name: "vm-pg-e", hostId: "ph-e-02", clusterId: "cl-east-db", site: "east", status: "running", cpu: 52, mem: 70, ip: "10.10.1.51" },
@@ -187,7 +195,7 @@ const WORKFLOWS: DrWorkflow[] = SERVICES.map((service) => ({
   serviceId: service.id,
   name: `${service.name} failover`,
   mode: service.mode,
-  steps: ["Quiesce writes", "Promote standby database", "Start application on standby host", "Move service address", "Verify health"],
+  steps: ["Quiesce writes", "Promote standby database", "Start application on standby host", "Move service address", "Verify health", "Confirm service IP"],
   stepState: [],
   lastRun: service.id === "svc-billing" ? "6 h ago" : "Not run",
   status: "Ready" as const,
@@ -218,6 +226,46 @@ const AUDIT: DrAudit[] = [
   { id: "au2", actor: "Global", action: "Updated RPO", target: "billing-core", at: "3 d" },
 ];
 
+const SERVICE_OWNER: Record<string, { ip: string; vmId: string }> = {
+  "svc-checkout": { ip: "10.10.1.100", vmId: "vm-chk-e" },
+  "svc-portal": { ip: "10.10.1.110", vmId: "vm-iis-e" },
+  "svc-billing": { ip: "10.20.2.100", vmId: "vm-bill-w" },
+  "svc-catalog": { ip: "10.10.1.120", vmId: "vm-cat-e" },
+  "svc-hr": { ip: "10.30.1.100", vmId: "vm-hr-c" },
+};
+
+const VM_MAC: Record<string, string> = {
+  "vm-chk-e": "00:15:5D:11:01:41",
+  "vm-chk-w": "00:15:5D:22:02:41",
+  "vm-pg-e": "00:15:5D:11:01:51",
+  "vm-pg-w": "00:15:5D:22:02:51",
+  "vm-iis-e": "00:15:5D:11:01:42",
+  "vm-iis-c": "00:15:5D:33:03:42",
+  "vm-ot-e": "00:15:5D:11:01:61",
+  "vm-ot-c": "00:15:5D:33:03:61",
+  "vm-bill-w": "00:15:5D:22:02:43",
+  "vm-bill-c": "00:15:5D:33:03:43",
+  "vm-ms-w": "00:15:5D:22:02:52",
+  "vm-ms-c": "00:15:5D:33:03:52",
+  "vm-cat-e": "00:15:5D:11:01:44",
+  "vm-cat-w": "00:15:5D:22:02:44",
+  "vm-mo-e": "00:15:5D:11:01:53",
+  "vm-mo-w": "00:15:5D:22:02:53",
+  "vm-hr-c": "00:15:5D:33:03:45",
+  "vm-hr-e": "00:15:5D:11:01:45",
+  "vm-my-c": "00:15:5D:33:03:54",
+  "vm-my-e": "00:15:5D:11:01:54",
+};
+
+function decorateService(row: Omit<DrService, "serviceIp" | "ownerVmId" | "ownerSource" | "ownerCheckedAt">): DrService {
+  const extra = SERVICE_OWNER[row.id];
+  return { ...row, serviceIp: extra?.ip ?? "", ownerVmId: extra?.vmId ?? null, ownerSource: "unconfirmed", ownerCheckedAt: "" };
+}
+
+function decorateVm(row: Omit<DrVm, "mac">): DrVm {
+  return { ...row, mac: VM_MAC[row.id] ?? "" };
+}
+
 type DrState = {
   services: DrService[];
   hosts: DrHost[];
@@ -233,6 +281,7 @@ type DrState = {
   setMode: (serviceId: string, mode: FailoverMode) => void;
   runFailover: (serviceId: string, trigger: FailoverMode) => void;
   advanceRun: (serviceId: string) => void;
+  refreshOwner: (serviceId: string, silent?: boolean) => Promise<void>;
   resumeRuns: () => void;
 };
 
@@ -266,10 +315,128 @@ function statesFor(flow: DrWorkflow): DrStepState[] {
   return flow.steps.map(() => "pending");
 }
 
+type Observation = {
+  ok: boolean;
+  source: OwnerSource;
+  ownerNode: string;
+  ownerGroup: string;
+  mac: string;
+  state: string;
+  message: string;
+};
+
+function memberVms(state: { apps: DrApp[]; databases: DrDatabase[]; vms: DrVm[] }, serviceId: string) {
+  const ids = new Set<string>();
+  for (const app of state.apps) if (app.serviceId === serviceId) ids.add(app.vmId);
+  for (const db of state.databases) if (db.serviceId === serviceId) ids.add(db.vmId);
+  return state.vms.filter((vm) => ids.has(vm.id));
+}
+
+function normMac(value: string) {
+  return value.replace(/[^0-9a-fA-F]/g, "").toUpperCase();
+}
+
+function matchMember(members: DrVm[], hosts: DrHost[], observation: Observation): DrVm | null {
+  const mac = normMac(observation.mac);
+  if (mac) {
+    const byMac = members.find((vm) => normMac(vm.mac) === mac);
+    if (byMac) return byMac;
+  }
+  const names = [observation.ownerNode, observation.ownerGroup].map((item) => item.trim().toLowerCase()).filter(Boolean);
+  for (const name of names) {
+    const byVm = members.find((vm) => vm.name.toLowerCase() === name);
+    if (byVm) return byVm;
+  }
+  for (const name of names) {
+    const host = hosts.find((item) => item.name.toLowerCase() === name);
+    if (!host) continue;
+    const onHost = members.filter((vm) => vm.hostId === host.id);
+    if (onHost.length === 1) return onHost[0];
+  }
+  return null;
+}
+
+function otherSite(service: DrService, ownerSite: SiteKey, members: DrVm[]): SiteKey {
+  const sites = [...new Set(members.map((vm) => vm.site))].filter((site) => site !== ownerSite);
+  if (service.standbySite !== ownerSite && sites.includes(service.standbySite)) return service.standbySite;
+  if (sites.length === 1) return sites[0];
+  if (service.site !== ownerSite) return service.site;
+  return service.standbySite;
+}
+
+function onlineState(state: string) {
+  return state === "" || /^online$/i.test(state);
+}
+
+function explain(observation: Observation, match: DrVm | null, service: DrService) {
+  if (!service.serviceIp) return `${service.name} has no service IP. The active site was not changed.`;
+  if (!onlineState(observation.state) && observation.ok) return `The service IP ${service.serviceIp} is ${observation.state} on the host. The active site was not changed.`;
+  if (!observation.ok || !match) return observation.message || `The host did not report an owner for ${service.serviceIp}. The active site was not changed.`;
+  const how = observation.source === "cluster" ? "The cluster" : "The MAC table";
+  return `${how} reports ${match.name} owns ${service.serviceIp}.`;
+}
+
+async function askHost(ip: string): Promise<Observation> {
+  const computer = typeof window === "undefined" ? "" : (window.localStorage.getItem("infocloudarc-hv-host") ?? "");
+  try {
+    const result = await observeOwner({ data: { ip, computer } });
+    const source = result.source === "cluster" || result.source === "mac" ? result.source : "unconfirmed";
+    return { ok: result.ok && source !== "unconfirmed", source, ownerNode: result.ownerNode, ownerGroup: result.ownerGroup, mac: result.mac, state: result.state, message: result.message };
+  } catch (error) {
+    return { ok: false, source: "unconfirmed", ownerNode: "", ownerGroup: "", mac: "", state: "", message: error instanceof Error ? error.message : "The host check failed. The recorded site was kept." };
+  }
+}
+
+async function finishRun(serviceId: string) {
+  const fresh = useDr.getState();
+  const service = fresh.services.find((item) => item.id === serviceId);
+  const flow = fresh.workflows.find((item) => item.serviceId === serviceId);
+  if (!service || !flow || flow.status !== "Running") return;
+  const states = statesFor(flow);
+  const index = states.findIndex((item) => item === "running");
+  const cloud = useCloud.getState();
+  const at = nowLabel();
+  const observation = service.serviceIp
+    ? await askHost(service.serviceIp)
+    : { ok: false, source: "unconfirmed" as const, ownerNode: "", ownerGroup: "", mac: "", state: "", message: `${service.name} has no service IP. The active site was not moved.` };
+  const liveState = useDr.getState();
+  const live = liveState.services.find((item) => item.id === serviceId);
+  const liveFlow = liveState.workflows.find((item) => item.serviceId === serviceId);
+  if (!live || !liveFlow || liveFlow.status !== "Running") return;
+  const members = memberVms(liveState, serviceId);
+  const match = observation.ok ? matchMember(members, liveState.hosts, observation) : null;
+  const moved = Boolean(match && onlineState(observation.state) && match.site === live.standbySite);
+  if (!moved || !match) {
+    if (index >= 0) states[index] = "failed";
+    useDr.setState({
+      services: liveState.services.map((item) => (item.id === serviceId ? { ...item, ownerSource: "unconfirmed", ownerCheckedAt: at } : item)),
+      workflows: liveState.workflows.map((item) => (item.serviceId === serviceId ? { ...item, status: "Failed", stepState: states, lastRun: "Failed" } : item)),
+      events: [{ id: `ev-${Date.now()}`, target: live.name, message: `Service IP ${live.serviceIp || "is unset"} was not seen on the standby. Active site was not moved.`, at, severity: "Critical" as const }, ...liveState.events].slice(0, 20),
+      alerts: [{ id: `al-${Date.now()}`, target: live.name, message: "Failover did not confirm the service IP on the standby instance.", severity: "Critical" as const, state: "Open" as const }, ...liveState.alerts].slice(0, 20),
+      audit: [{ id: `au-${Date.now()}`, actor: ROLE_LABEL[cloud.role], action: "Failover not confirmed", target: `${live.name}: ${live.serviceIp || "no service IP"}`, at }, ...liveState.audit].slice(0, 40),
+    });
+    cloud.flash(`${live.name} stayed on ${siteLabel(live.site)}. ${explain(observation, match, live)}`);
+    return;
+  }
+  if (index >= 0) states[index] = "done";
+  const from = live.site;
+  const to = match.site;
+  const standby = otherSite(live, to, members);
+  useDr.setState({
+    services: liveState.services.map((item) => (item.id === serviceId ? { ...item, site: to, standbySite: standby, ownerVmId: match.id, ownerSource: observation.source, ownerCheckedAt: at, status: "Healthy" } : item)),
+    workflows: liveState.workflows.map((item) => (item.serviceId === serviceId ? { ...item, status: "Success", stepState: states, lastRun: "Just now" } : item)),
+    events: [{ id: `ev-${Date.now()}`, target: live.name, message: `${live.mode === "auto" ? "Automated" : "Manual"} failover confirmed. ${match.name} owns ${live.serviceIp}.`, at, severity: "Info" as const }, ...liveState.events].slice(0, 20),
+    alerts: [{ id: `al-${Date.now()}`, target: live.name, message: `Service IP confirmed on ${match.name}.`, severity: "Warning" as const, state: "Open" as const }, ...liveState.alerts].slice(0, 20),
+    audit: [{ id: `au-${Date.now()}`, actor: ROLE_LABEL[cloud.role], action: "Confirmed failover", target: `${live.name} ${from} → ${to}`, at }, ...liveState.audit].slice(0, 40),
+    performance: [{ id: `pf-${Date.now()}`, target: live.name, kind: "service", metric: "Failover", value: live.mode === "auto" ? "38 s" : "2 min", at }, ...liveState.performance].slice(0, 24),
+  });
+  cloud.flash(`${live.name} is primary on ${siteLabel(to)} because ${match.name} owns ${live.serviceIp}.`);
+}
+
 export const useDr = create<DrState>((set, get) => ({
-  services: SERVICES,
+  services: SERVICES.map(decorateService),
   hosts: HOSTS,
-  vms: VMS,
+  vms: VMS.map(decorateVm),
   clusters: CLUSTERS,
   apps: APPS,
   databases: DATABASES,
@@ -352,9 +519,9 @@ export const useDr = create<DrState>((set, get) => ({
       cloud.flash(`${service.name} stopped on ${step}. The active site did not change.`);
       return;
     }
-    states[current] = "done";
     const next = current + 1;
     if (next < flow.steps.length) {
+      states[current] = "done";
       states[next] = "running";
       set({
         workflows: get().workflows.map((item) => (item.serviceId === serviceId ? { ...item, stepState: states } : item)),
@@ -363,18 +530,46 @@ export const useDr = create<DrState>((set, get) => ({
       scheduleRun(serviceId);
       return;
     }
-    const from = service.site;
-    const to = service.standbySite;
-    const trigger = service.mode;
+    void finishRun(serviceId);
+  },
+  refreshOwner: async (serviceId, silent) => {
+    const service = get().services.find((item) => item.id === serviceId);
+    if (!service) return;
+    const cloud = useCloud.getState();
+    if (!allowed(service)) {
+      if (!silent) cloud.flash(`Site access can check only ${siteLabel(cloud.site === "all" ? "east" : cloud.site)} services.`);
+      return;
+    }
+    if (!service.serviceIp) {
+      if (!silent) cloud.flash(`${service.name} has no service IP to check.`);
+      return;
+    }
+    const observation = await askHost(service.serviceIp);
+    const fresh = get();
+    const live = fresh.services.find((item) => item.id === serviceId);
+    if (!live) return;
+    const members = memberVms(fresh, serviceId);
+    const match = observation.ok ? matchMember(members, fresh.hosts, observation) : null;
+    const at = nowLabel();
+    if (!match || !onlineState(observation.state)) {
+      if (silent) return;
+      set({
+        services: fresh.services.map((item) => (item.id === serviceId ? { ...item, ownerSource: "unconfirmed", ownerCheckedAt: at } : item)),
+        audit: [{ id: `au-${Date.now()}`, actor: ROLE_LABEL[cloud.role], action: "Owner check inconclusive", target: `${live.name}: ${live.serviceIp}`, at }, ...fresh.audit].slice(0, 40),
+      });
+      cloud.flash(explain(observation, match, live));
+      return;
+    }
+    const from = live.site;
+    const to = match.site;
+    const standby = otherSite(live, to, members);
+    const changed = from !== to;
     set({
-      services: get().services.map((item) => (item.id === serviceId ? { ...item, site: to, standbySite: from, status: "Healthy" } : item)),
-      workflows: get().workflows.map((item) => (item.serviceId === serviceId ? { ...item, status: "Success", stepState: states, lastRun: "Just now" } : item)),
-      events: [{ id: `ev-${Date.now()}`, target: service.name, message: `${trigger === "auto" ? "Automated" : "Manual"} failover ${from} to ${to}`, at, severity: "Info" as const }, ...get().events].slice(0, 20),
-      alerts: [{ id: `al-${Date.now()}`, target: service.name, message: `Failover completed. Verify ${to} health.`, severity: "Warning" as const, state: "Open" as const }, ...get().alerts].slice(0, 20),
-      audit: [{ id: `au-${Date.now()}`, actor: ROLE_LABEL[cloud.role], action: `${trigger === "auto" ? "Automated" : "Manual"} failover`, target: `${service.name} ${from} → ${to}`, at }, ...get().audit].slice(0, 40),
-      performance: [{ id: `pf-${Date.now()}`, target: service.name, kind: "service", metric: "Failover", value: trigger === "auto" ? "38 s" : "2 min", at }, ...get().performance].slice(0, 24),
+      services: fresh.services.map((item) => (item.id === serviceId ? { ...item, site: to, standbySite: standby, ownerVmId: match.id, ownerSource: observation.source, ownerCheckedAt: at } : item)),
+      events: changed ? [{ id: `ev-${Date.now()}`, target: live.name, message: `Observed ${match.name} owns ${live.serviceIp}. Primary is ${siteLabel(to)}.`, at, severity: "Info" as const }, ...fresh.events].slice(0, 20) : fresh.events,
+      audit: !silent || changed ? [{ id: `au-${Date.now()}`, actor: ROLE_LABEL[cloud.role], action: changed ? "Observed owner changed" : "Confirmed service IP owner", target: `${live.name}: ${match.name}`, at }, ...fresh.audit].slice(0, 40) : fresh.audit,
     });
-    cloud.flash(`${service.name} failed over from ${siteLabel(from)} to ${siteLabel(to)}.`);
+    if (!silent || changed) cloud.flash(changed ? `${live.name} primary is now ${siteLabel(to)} because ${match.name} owns ${live.serviceIp}.` : `${match.name} owns ${live.serviceIp}. ${siteLabel(to)} stays primary.`);
   },
   resumeRuns: () => {
     for (const flow of get().workflows) {

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { refreshServices, type WorkloadSample } from "@/lib/cloud/uptime";
 import {
   ARRAYS,
   BACKUPS,
@@ -111,6 +112,7 @@ type CloudState = {
   hosts: PhysicalHost[];
   workloadApps: WorkloadApp[];
   workloadDatabases: WorkloadDatabase[];
+  workloadSamples: WorkloadSample[];
   snmp: SnmpConfig;
   appSubnet: string;
   appAddress: string;
@@ -132,6 +134,8 @@ type CloudState = {
   addExtraSubnet: (cidr: string) => void;
   setSnmp: (patch: Partial<SnmpConfig>) => void;
   poll: () => void;
+  captureWorkloads: () => void;
+  recordReading: (row: WorkloadSample) => void;
   acknowledgePort: (id: string) => void;
   syncRepo: (id: string) => void;
   renewSubscription: (id: string) => void;
@@ -197,6 +201,7 @@ export const useCloud = create<CloudState>((set, get) => ({
   hosts: PHYSICAL_HOSTS,
   workloadApps: WORKLOAD_APPS,
   workloadDatabases: WORKLOAD_DATABASES,
+  workloadSamples: [],
   snmp: DEFAULT_SNMP,
   appSubnet: "",
   appAddress: "",
@@ -243,6 +248,7 @@ export const useCloud = create<CloudState>((set, get) => ({
       activity: [{ id: `a-${Date.now()}`, text: `${verb} ${vm.name} (${siteLabel(vm.site)})`, when: "now" }, ...activity].slice(0, 8),
     });
     flash(`${verb} ${vm.name}.`);
+    get().captureWorkloads();
   },
   deployInstance: (input) => {
     const { role, instances, flash, activity } = get();
@@ -275,6 +281,7 @@ export const useCloud = create<CloudState>((set, get) => ({
       activity: [{ id: `a-${Date.now()}`, text: `Deployed ${name} on ${input.site}`, when: "now" }, ...activity].slice(0, 8),
     });
     flash(`Deployed ${name}.`);
+    get().captureWorkloads();
   },
   addAsset: (input) => {
     const { role, inventory, ports, flash } = get();
@@ -381,6 +388,7 @@ export const useCloud = create<CloudState>((set, get) => ({
       pollTick: tick,
       lastPollAt: Date.now(),
     });
+    get().captureWorkloads();
     if (result.alerts.some((alert) => alert.severity === "major")) {
       state.flash("Major alert queued to the mobile target.");
     } else if (result.alerts.length > 0) {
@@ -407,6 +415,34 @@ export const useCloud = create<CloudState>((set, get) => ({
       ports: get().ports.map((item) => (item.id === id ? { ...item, alarmAck: true } : item)),
     });
     get().flash(`${port.name} acknowledged. Red alarm suppressed.`);
+  },
+  captureWorkloads: () => {
+    const state = get();
+    const built = refreshServices({
+      services: state.services,
+      apps: state.workloadApps,
+      databases: state.workloadDatabases,
+      samples: state.workloadSamples,
+    });
+    const sameSamples = built.samples.length === state.workloadSamples.length && built.samples.every((row) => {
+      const old = state.workloadSamples.find((item) => item.id === row.id);
+      return !!old && old.up === row.up && old.performance === row.performance && old.source === row.source && old.detail === row.detail;
+    });
+    const sameScores = built.services.length === state.services.length && built.services.every((row, index) => {
+      const old = state.services[index];
+      return !!old && old.name === row.name && old.availability === row.availability && old.performance === row.performance;
+    });
+    if (sameSamples && sameScores) return;
+    set({ workloadSamples: built.samples, services: built.services });
+  },
+  recordReading: (row) => {
+    if (!row.source) return;
+    const state = get();
+    set({
+      workloadSamples: [...state.workloadSamples.filter((item) => item.id !== row.id), row],
+    });
+    get().captureWorkloads();
+    get().flash(row.performance < 0 ? `Recorded ${row.target} without a performance number.` : `Recorded ${row.target}.`);
   },
   syncRepo: (id) => {
     const { repositories, flash, activity } = get();
@@ -449,6 +485,7 @@ export const useCloud = create<CloudState>((set, get) => ({
       services: upsert(get().services, { ...row, instances: Math.max(row.instances, linked.size) }, "name"),
     });
     get().flash(`Saved service ${row.name}.`);
+    get().captureWorkloads();
   },
   deleteService: (name) => {
     const row = get().services.find((item) => item.name === name);
@@ -459,6 +496,7 @@ export const useCloud = create<CloudState>((set, get) => ({
       workloadDatabases: get().workloadDatabases.filter((item) => item.serviceName !== name),
     });
     get().flash(`Deleted service ${name}.`);
+    get().captureWorkloads();
   },
   saveWorkloadApp: (row) => {
     const service = get().services.find((item) => item.name === row.serviceName);
@@ -469,6 +507,7 @@ export const useCloud = create<CloudState>((set, get) => ({
     }
     set({ workloadApps: upsert(get().workloadApps, row, "id") });
     get().flash(`Saved application ${row.name}.`);
+    get().captureWorkloads();
   },
   deleteWorkloadApp: (id) => {
     const row = get().workloadApps.find((item) => item.id === id);
@@ -476,6 +515,7 @@ export const useCloud = create<CloudState>((set, get) => ({
     if (!row || !service || !allowSite(get, service.site)) return;
     set({ workloadApps: get().workloadApps.filter((item) => item.id !== id) });
     get().flash(`Deleted application ${row.name}.`);
+    get().captureWorkloads();
   },
   saveWorkloadDatabase: (row) => {
     const service = get().services.find((item) => item.name === row.serviceName);
@@ -486,6 +526,7 @@ export const useCloud = create<CloudState>((set, get) => ({
     }
     set({ workloadDatabases: upsert(get().workloadDatabases, row, "id") });
     get().flash(`Saved database ${row.name}.`);
+    get().captureWorkloads();
   },
   deleteWorkloadDatabase: (id) => {
     const row = get().workloadDatabases.find((item) => item.id === id);
@@ -493,6 +534,7 @@ export const useCloud = create<CloudState>((set, get) => ({
     if (!row || !service || !allowSite(get, service.site)) return;
     set({ workloadDatabases: get().workloadDatabases.filter((item) => item.id !== id) });
     get().flash(`Deleted database ${row.name}.`);
+    get().captureWorkloads();
   },
   saveCluster: (row) => {
     if (!allowSite(get, row.site)) return;
@@ -513,6 +555,7 @@ export const useCloud = create<CloudState>((set, get) => ({
     if (!allowSite(get, row.site)) return;
     set({ hosts: upsert(get().hosts, row, "id") });
     get().flash(`Saved host ${row.name}.`);
+    get().captureWorkloads();
   },
   deleteHost: (id) => {
     const row = get().hosts.find((item) => item.id === id);
@@ -530,6 +573,7 @@ export const useCloud = create<CloudState>((set, get) => ({
       workloadDatabases: clear(get().workloadDatabases),
     });
     get().flash(`Deleted host ${row.name}.`);
+    get().captureWorkloads();
   },
   saveSwitch: (row) => {
     if (!allowSite(get, row.site)) return;

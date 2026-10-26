@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Button, Kpi, Panel, Select, StatusPill, Table, TableWrap, Td, Th } from "@/components/ui";
 import { APP_LABEL, DB_LABEL, useDr, type AppKind, type DbKind, type DrService } from "@/lib/cloud/dr";
 import { canMutateSite, inScope, matches, siteLabel, type Role, type SiteFilter } from "@/lib/cloud/model";
@@ -25,6 +26,22 @@ export function ServiceDrView({ focus }: { focus: Focus }) {
   const audit = useDr((s) => s.audit);
   const setMode = useDr((s) => s.setMode);
   const runFailover = useDr((s) => s.runFailover);
+  const refreshOwner = useDr((s) => s.refreshOwner);
+  const [checking, setChecking] = useState("");
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const cloud = useCloud.getState();
+      const dr = useDr.getState();
+      for (const service of dr.services) {
+        if (!service.serviceIp) continue;
+        if (!canMutateSite(cloud.role, cloud.site, service.site)) continue;
+        if (dr.workflows.some((item) => item.serviceId === service.id && item.status === "Running")) continue;
+        void dr.refreshOwner(service.id, true);
+      }
+    }, 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   const visible = services.filter((service) => touches(role, site, service));
   const title = focus.domain === "all" ? "All services" : focus.domain === "app" ? APP_LABEL[focus.kind] : DB_LABEL[focus.kind];
@@ -77,7 +94,7 @@ export function ServiceDrView({ focus }: { focus: Focus }) {
       <section className="rounded-2xl border border-line bg-white px-4 py-3 shadow-[0_10px_28px_rgba(232,93,4,0.06)]">
         <div className="text-xs font-medium tracking-wide text-accent uppercase">Service DR · {title}</div>
         <p className="mt-1 text-sm text-ink">
-          Disaster recovery for applications, databases, services, virtual machines, and physical hosts. Automated failover runs the armed workflow. Manual failover moves the active site only when you start it.
+          Primary is whichever instance currently owns the service IP. The console asks the Hyper-V host or cluster. Nothing is installed inside the virtual machine. A failover is recorded only after that check sees the address on the standby instance.
         </p>
       </section>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -87,50 +104,63 @@ export function ServiceDrView({ focus }: { focus: Focus }) {
         <Kpi label="Open alerts" value={String(alertRows.filter((item) => item.state === "Open").length)} hint={`${hostRows.length} hosts`} />
       </div>
 
-      <Panel title="Services" subtitle="Active site is the one taking traffic. Standby is the failover target.">
+      <Panel title="Services" subtitle="Active site follows the last confirmed owner of the service IP. Standby is the other site in the pair.">
         <TableWrap>
           <Table>
             <thead>
-              <tr><Th>Service</Th><Th>Active</Th><Th>Standby</Th><Th>RPO</Th><Th>RTO</Th><Th>Mode</Th><Th>Status</Th><Th>Action</Th></tr>
+              <tr><Th>Service</Th><Th>Service IP</Th><Th>Primary instance</Th><Th>Active</Th><Th>Standby</Th><Th>Source</Th><Th>Mode</Th><Th>Status</Th><Th>Action</Th></tr>
             </thead>
             <tbody>
-              {serviceRows.map((service) => (
-                <tr key={service.id}>
-                  <Td>{service.name}</Td>
-                  <Td>{siteLabel(service.site)}</Td>
-                  <Td>{siteLabel(service.standbySite)}</Td>
-                  <Td mono>{service.rpo}</Td>
-                  <Td mono>{service.rto}</Td>
-                  <Td>
-                    {canMutateSite(role, site, service.site) ? (
-                      <Select aria-label={`${service.name} failover mode`} value={service.mode} onChange={(event) => setMode(service.id, event.target.value as "auto" | "manual")}>
-                        <option value="auto">Automated</option>
-                        <option value="manual">Manual</option>
-                      </Select>
-                    ) : (
-                      service.mode === "auto" ? "Automated" : "Manual"
-                    )}
-                  </Td>
-                  <Td><StatusPill value={service.status} /></Td>
-                  <Td>
-                    {canMutateSite(role, site, service.site) ? (
-                      <Button
-                        variant="primary"
-                        disabled={workflows.some((item) => item.serviceId === service.id && item.status === "Running")}
-                        onClick={() => runFailover(service.id, service.mode)}
-                      >
-                        {workflows.some((item) => item.serviceId === service.id && item.status === "Running")
-                          ? "Running"
-                          : service.mode === "auto"
-                            ? "Run workflow"
-                            : "Fail over"}
-                      </Button>
-                    ) : (
-                      "View only"
-                    )}
-                  </Td>
-                </tr>
-              ))}
+              {serviceRows.map((service) => {
+                const owner = vms.find((vm) => vm.id === service.ownerVmId);
+                const running = workflows.some((item) => item.serviceId === service.id && item.status === "Running");
+                const source = service.ownerSource === "cluster" ? "Cluster" : service.ownerSource === "mac" ? "MAC" : "Not checked";
+                return (
+                  <tr key={service.id}>
+                    <Td>{service.name}</Td>
+                    <Td mono>{service.serviceIp || "—"}</Td>
+                    <Td>{owner?.name ?? "—"}</Td>
+                    <Td>{siteLabel(service.site)}</Td>
+                    <Td>{siteLabel(service.standbySite)}</Td>
+                    <Td>{source}{service.ownerCheckedAt ? ` · ${service.ownerCheckedAt}` : ""}</Td>
+                    <Td>
+                      {canMutateSite(role, site, service.site) ? (
+                        <Select aria-label={`${service.name} failover mode`} value={service.mode} onChange={(event) => setMode(service.id, event.target.value as "auto" | "manual")}>
+                          <option value="auto">Automated</option>
+                          <option value="manual">Manual</option>
+                        </Select>
+                      ) : (
+                        service.mode === "auto" ? "Automated" : "Manual"
+                      )}
+                    </Td>
+                    <Td><StatusPill value={service.status} /></Td>
+                    <Td>
+                      {canMutateSite(role, site, service.site) ? (
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            disabled={running || checking === service.id}
+                            onClick={() => {
+                              setChecking(service.id);
+                              void refreshOwner(service.id).finally(() => setChecking(""));
+                            }}
+                          >
+                            {checking === service.id ? "Checking" : "Check IP"}
+                          </Button>
+                          <Button
+                            variant="primary"
+                            disabled={running}
+                            onClick={() => runFailover(service.id, service.mode)}
+                          >
+                            {running ? "Running" : service.mode === "auto" ? "Run workflow" : "Fail over"}
+                          </Button>
+                        </div>
+                      ) : (
+                        "View only"
+                      )}
+                    </Td>
+                  </tr>
+                );
+              })}
             </tbody>
           </Table>
         </TableWrap>
@@ -152,14 +182,14 @@ export function ServiceDrView({ focus }: { focus: Focus }) {
           <MiniTable head={["Cluster", "Kind", "Nodes", "Status"]} rows={clusterRows.map((item) => [item.name, item.kind, String(item.nodes), item.status])} />
         </Panel>
         <Panel title="Virtual machines">
-          <MiniTable head={["VM", "Host", "CPU", "Status"]} rows={vmRows.map((vm) => [vm.name, hosts.find((host) => host.id === vm.hostId)?.name ?? "—", `${vm.cpu}%`, vm.status])} />
+          <MiniTable head={["VM", "MAC", "Host", "Status"]} rows={vmRows.map((vm) => [vm.name, vm.mac || "—", hosts.find((host) => host.id === vm.hostId)?.name ?? "—", vm.status])} />
         </Panel>
         <Panel title="Physical hosts">
           <MiniTable head={["Host", "Site", "CPU", "Status"]} rows={hostRows.map((host) => [host.name, siteLabel(host.site), `${host.cpu}%`, host.status])} />
         </Panel>
       </div>
 
-      <Panel title="Workflows" subtitle="Automated and manual failover use the same steps. Each step is recorded. A service already in warning fails the health check and stays on the active site.">
+      <Panel title="Workflows" subtitle="The last step asks the Hyper-V host which instance owns the service IP. The active site changes only when that instance is the standby. A service already in warning fails the health check and stays put.">
         <TableWrap>
           <Table>
             <thead>
@@ -248,8 +278,16 @@ function mapWorkload(
   const vm = vms.find((item) => item.id === vmId);
   const host = hosts.find((item) => item.id === vm?.hostId);
   const cluster = clusters.find((item) => item.id === vm?.clusterId);
-  const role = service && vm && vm.site === service.site ? "Active" : "Standby";
-  return [service?.name ?? "—", name, kind, vm?.name ?? "—", cluster?.name ?? "—", host?.name ?? "—", role, replica ?? "—", status];
+  const roleLabel = !service || !vm
+    ? "—"
+    : service.ownerSource !== "unconfirmed" && service.ownerVmId === vm.id
+      ? "Primary"
+      : service.ownerSource === "unconfirmed" && vm.site === service.site
+        ? "Recorded"
+        : vm.site === service.site
+          ? "Active site"
+          : "Standby";
+  return [service?.name ?? "—", name, kind, vm?.name ?? "—", cluster?.name ?? "—", host?.name ?? "—", roleLabel, replica ?? "—", status];
 }
 
 function WorkloadTable({ rows }: { rows: string[][] }) {

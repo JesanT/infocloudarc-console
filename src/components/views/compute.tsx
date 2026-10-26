@@ -1,9 +1,15 @@
 import { useEffect, useState } from "react";
 import { CatalogTable } from "@/components/catalog-table";
+import { Trend } from "@/components/charts";
 import { Button, Empty, Field, Kpi, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
+import { appReading, defaultAppPath } from "@/lib/cloud/app-score";
+import { readApplication } from "@/lib/cloud/app-probe";
+import { defaultPort, engineReading, engineSupported, statusFrom } from "@/lib/cloud/engine-score";
+import { readEngine } from "@/lib/cloud/engine-probe";
 import { hypervAction } from "@/lib/cloud/hyperv";
 import { boundSite, canMutateSite, inScope, matches, siteLabel, siteOptions, type ComputeCluster, type ComputeService, type Instance, type PhysicalHost, type SiteKey, type WorkloadApp, type WorkloadDatabase } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
+import { chartPoints, currentHour, hourLabel, rollup, sampleId, type SampleKind } from "@/lib/cloud/uptime";
 
 type SummaryRow = {
   id: string;
@@ -39,6 +45,12 @@ export function ServicesView() {
 
   return (
     <div className="space-y-4">
+      <WorkloadUptime
+        kind="service"
+        targets={rows.map((item) => item.name)}
+        apps={apps.filter((item) => visible.has(item.serviceName))}
+        databases={databases.filter((item) => visible.has(item.serviceName))}
+      />
       <CatalogTable<ComputeService>
         title="Services"
         subtitle="A service depends on an application, a database, or both."
@@ -49,8 +61,6 @@ export function ServicesView() {
           { key: "name", label: "Name" },
           { key: "site", label: "Site", options: choices },
           { key: "health", label: "Status", options: ["Healthy", "Degraded"] },
-          { key: "availability", label: "Availability", numeric: true },
-          { key: "performance", label: "Performance", numeric: true },
           { key: "note", label: "Note" },
         ]}
         blank={() => ({ name: "", site: home, health: "Healthy", instances: 1, availability: 99.9, performance: 95, note: "" })}
@@ -99,18 +109,53 @@ export function DatabasesView() {
   const names = new Set(visibleServices.map((item) => item.name));
   const rows = databases.filter((item) => names.has(item.serviceName) && matches(query, [item.name, item.engine, item.serviceName]));
   return (
-    <DependencyTable
-      title="Databases"
-      subtitle="A database belongs to a service and runs on a virtual machine, a physical host, or both."
-      rows={rows}
-      kind="db"
-      services={visibleServices}
-      instances={instances.filter((item) => inScope(role, site, item.site))}
-      hosts={hosts.filter((item) => inScope(role, site, item.site))}
-      allow
-      onSave={(row) => saveDb(row as WorkloadDatabase)}
-      onDelete={deleteDb}
-    />
+    <div className="space-y-4">
+      <WorkloadUptime kind="database" targets={rows.map((item) => item.name)} databases={rows} />
+      <DependencyTable
+        title="Databases"
+        subtitle="A database belongs to a service and runs on a virtual machine, a physical host, or both."
+        rows={rows}
+        kind="db"
+        services={visibleServices}
+        instances={instances.filter((item) => inScope(role, site, item.site))}
+        hosts={hosts.filter((item) => inScope(role, site, item.site))}
+        allow
+        onSave={(row) => saveDb(row as WorkloadDatabase)}
+        onDelete={deleteDb}
+      />
+    </div>
+  );
+}
+
+export function ApplicationsView() {
+  const role = useCloud((s) => s.role);
+  const site = useCloud((s) => s.site);
+  const query = useCloud((s) => s.query);
+  const services = useCloud((s) => s.services);
+  const apps = useCloud((s) => s.workloadApps);
+  const instances = useCloud((s) => s.instances);
+  const hosts = useCloud((s) => s.hosts);
+  const saveApp = useCloud((s) => s.saveWorkloadApp);
+  const deleteApp = useCloud((s) => s.deleteWorkloadApp);
+  const visibleServices = services.filter((item) => inScope(role, site, item.site));
+  const names = new Set(visibleServices.map((item) => item.name));
+  const rows = apps.filter((item) => names.has(item.serviceName) && matches(query, [item.name, item.kind, item.serviceName]));
+  return (
+    <div className="space-y-4">
+      <WorkloadUptime kind="app" targets={rows.map((item) => item.name)} apps={rows} />
+      <DependencyTable
+        title="Applications"
+        subtitle="An application belongs to a service and runs on a virtual machine, a physical host, or both."
+        rows={rows}
+        kind="app"
+        services={visibleServices}
+        instances={instances.filter((item) => inScope(role, site, item.site))}
+        hosts={hosts.filter((item) => inScope(role, site, item.site))}
+        allow
+        onSave={(row) => saveApp(row as WorkloadApp)}
+        onDelete={deleteApp}
+      />
+    </div>
   );
 }
 
@@ -194,6 +239,296 @@ export function ClustersView() {
         onDelete={deleteHost}
       />
     </div>
+  );
+}
+
+function scoreText(value: number, digits: number) {
+  if (value < 0) return "Not measured";
+  return `${value.toFixed(digits)}%`;
+}
+
+function addressFor(vmId: string | null, hostId: string | null, instances: Instance[], hosts: PhysicalHost[]) {
+  return instances.find((item) => item.id === vmId)?.ip || hosts.find((item) => item.id === hostId)?.ip || "";
+}
+
+function WorkloadUptime({
+  kind,
+  targets,
+  apps = [],
+  databases = [],
+}: {
+  kind: SampleKind;
+  targets: string[];
+  apps?: WorkloadApp[];
+  databases?: WorkloadDatabase[];
+}) {
+  const samples = useCloud((s) => s.workloadSamples);
+  const capture = useCloud((s) => s.captureWorkloads);
+  const allApps = useCloud((s) => s.workloadApps);
+  const allDatabases = useCloud((s) => s.workloadDatabases);
+  useEffect(() => {
+    capture();
+  }, [capture]);
+  const cards = targets.map((name) => {
+    const points = chartPoints({
+      kind,
+      target: name,
+      samples,
+      apps: kind === "service" ? apps : allApps,
+      databases: kind === "service" ? databases : allDatabases,
+    });
+    const checked = points.filter((point) => point.up !== null);
+    const score = rollup(checked.map((point) => ({ up: point.up === 1 ? 1 : 0, performance: point.performance ?? -1 })));
+    const latest = [...checked].reverse().find((point) => point.detail) ?? checked.at(-1);
+    return { name, points, score, latest };
+  });
+  const availabilityValues = cards.map((card) => card.score.availability).filter((value) => value >= 0);
+  const performanceValues = cards.map((card) => card.score.performance).filter((value) => value >= 0);
+  const availability = availabilityValues.length ? availabilityValues.reduce((sum, value) => sum + value, 0) / availabilityValues.length : -1;
+  const performance = performanceValues.length ? performanceValues.reduce((sum, value) => sum + value, 0) / performanceValues.length : -1;
+  const checks = cards.reduce((sum, card) => sum + card.score.checks, 0);
+  const noun = kind === "service" ? "services" : kind === "app" ? "applications" : "databases";
+  const detail = kind === "service"
+    ? "A service is not measured by itself. An hour counts only when every database under it was read that hour. An application counts when it was read. The score is the weakest of those readings. A blank hour was not checked."
+    : kind === "database"
+      ? "The console signs in to SQL Server, MySQL, MongoDB, or PostgreSQL and reads that engine’s own counters. Nothing is installed in the virtual machine. 100 means the counters that came back are in a normal range. It does not mean queries are fast. A failed login or a timeout is not saved."
+      : "The console requests the application server. Tomcat is read from the Manager status page. A metrics page is read when one is already published. Nothing is installed in the virtual machine, and a stopwatch around one request is not the score. A failed login or a timeout is not saved.";
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+        <Kpi label="In view" value={String(cards.length)} hint={noun} />
+        <Kpi label="Availability" value={scoreText(availability, 2)} hint={checks ? "Of hours that were checked" : "No reading yet"} />
+        <Kpi label="Performance" value={scoreText(performance, 0)} hint={checks ? (kind === "database" ? "Engine counters" : kind === "app" ? "Status or metrics" : "Weakest reading") : "No reading yet"} />
+      </div>
+      <Panel title="Last 24 hours" subtitle={detail}>
+        {kind === "database" && <EngineCheck databases={databases} />}
+        {kind === "app" && <ApplicationCheck apps={apps} />}
+        {cards.length === 0 ? (
+          <Empty>Nothing in this view.</Empty>
+        ) : (
+          <>
+            <div className="mb-3 flex flex-wrap gap-4 text-xs text-muted">
+              <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-4 bg-info" /> Up</span>
+              <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-4 bg-ok" /> Counter score</span>
+              <span>A gap is a missing check, not a healthy hour.</span>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              {cards.map((card) => (
+                <div key={card.name} className="rounded-xl border border-line p-3">
+                  <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                    <h3 className="text-sm font-medium text-ink">{card.name}</h3>
+                    <p className="text-xs text-muted">
+                      {scoreText(card.score.availability, 2)} up · {scoreText(card.score.performance, 0)} {statusFrom(card.score.performance).toLowerCase()} · {card.score.checks} checked
+                    </p>
+                  </div>
+                  <p className="mb-2 text-xs text-muted">{card.latest?.detail || "No reading in the last 24 hours."}</p>
+                  {card.score.checks === 0 ? null : (
+                    <Trend
+                      data={card.points.map((point) => ({ label: hourLabel(point.hour), a: point.up == null ? null : point.up ? 100 : 0, b: point.performance }))}
+                      aLabel="Up"
+                      bLabel="Counter score"
+                      className="h-32"
+                      interval={5}
+                      domain={[0, 100]}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </Panel>
+    </div>
+  );
+}
+
+function EngineCheck({ databases }: { databases: WorkloadDatabase[] }) {
+  const instances = useCloud((s) => s.instances);
+  const hosts = useCloud((s) => s.hosts);
+  const record = useCloud((s) => s.recordReading);
+  const [id, setId] = useState(databases[0]?.id ?? "");
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState("");
+  const [user, setUser] = useState("");
+  const [password, setPassword] = useState("");
+  const [database, setDatabase] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+  const selected = databases.find((item) => item.id === id) ?? databases[0];
+
+  useEffect(() => {
+    if (!selected) return;
+    setHost(addressFor(selected.vmId, selected.hostId, instances, hosts));
+    setPort(String(defaultPort(selected.engine) || ""));
+    setDatabase(selected.engine === "postgresql" ? "postgres" : selected.engine === "mssql" ? "master" : selected.engine === "mongodb" ? "admin" : "");
+    setNote("");
+    // Refill only when the operator picks a different database.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id]);
+
+  if (!selected) return null;
+  const supported = engineSupported(selected.engine);
+
+  return (
+    <form
+      className="mb-4 grid gap-3 md:grid-cols-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!supported || busy) return;
+        setBusy(true);
+        setNote("Reading counters…");
+        void readEngine({
+          data: { engine: selected.engine, host: host.trim(), port: Number(port), user: user.trim(), password, database: database.trim() },
+        })
+          .then((result) => {
+            if (!result.ok) {
+              setNote(result.message);
+              return;
+            }
+            const hour = currentHour();
+            record({
+              id: sampleId("database", selected.name, hour),
+              kind: "database",
+              target: selected.name,
+              hour,
+              up: result.up,
+              performance: result.performance,
+              source: result.source,
+              detail: result.detail,
+            });
+            setPassword("");
+            setNote(result.detail);
+          })
+          .catch((error: unknown) => {
+            setNote(error instanceof Error ? error.message : "The reading failed.");
+          })
+          .finally(() => setBusy(false));
+      }}
+    >
+      <Field label="Workload">
+        <Select value={selected.id} onChange={(event) => setId(event.target.value)}>
+          {databases.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.engine}</option>)}
+        </Select>
+      </Field>
+      <Field label="Address">
+        <input className={fieldClass} value={host} onChange={(event) => setHost(event.target.value)} placeholder="Listener or mongos" />
+      </Field>
+      <Field label="Port">
+        <input className={fieldClass} value={port} onChange={(event) => setPort(event.target.value)} />
+      </Field>
+      <Field label="Login">
+        <input className={fieldClass} value={user} autoComplete="off" onChange={(event) => setUser(event.target.value)} />
+      </Field>
+      <Field label="Password">
+        <input className={fieldClass} type="password" value={password} autoComplete="new-password" onChange={(event) => setPassword(event.target.value)} />
+      </Field>
+      <Field label={selected.engine === "mongodb" ? "Auth database" : "Database"}>
+        <input className={fieldClass} value={database} onChange={(event) => setDatabase(event.target.value)} />
+      </Field>
+      <div className="flex flex-wrap items-center gap-3 md:col-span-3">
+        <Button variant="primary" type="submit" disabled={!supported || busy}>{busy ? "Reading…" : "Read engine"}</Button>
+        <p className="text-xs text-muted">{engineReading(selected.engine)} The password is used for this reading only and is not saved. Use the listener or mongos address when the engine has one.</p>
+      </div>
+      {note && <p className="text-sm text-ink md:col-span-3">{note}</p>}
+    </form>
+  );
+}
+
+function ApplicationCheck({ apps }: { apps: WorkloadApp[] }) {
+  const instances = useCloud((s) => s.instances);
+  const hosts = useCloud((s) => s.hosts);
+  const record = useCloud((s) => s.recordReading);
+  const [id, setId] = useState(apps[0]?.id ?? "");
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState("");
+  const [path, setPath] = useState("/");
+  const [https, setHttps] = useState(false);
+  const [user, setUser] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+  const selected = apps.find((item) => item.id === id) ?? apps[0];
+
+  useEffect(() => {
+    if (!selected) return;
+    const nextPort = selected.port || (selected.kind === "tomcat" ? 8080 : 80);
+    setHost(addressFor(selected.vmId, selected.hostId, instances, hosts));
+    setPort(String(nextPort));
+    setPath(defaultAppPath(selected.kind, nextPort));
+    setHttps(nextPort === 443);
+    setNote("");
+    // Refill only when the operator picks a different application.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id]);
+
+  if (!selected) return null;
+
+  return (
+    <form
+      className="mb-4 grid gap-3 md:grid-cols-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (busy) return;
+        setBusy(true);
+        setNote("Reading the application…");
+        void readApplication({
+          data: { host: host.trim(), port: Number(port), path: path.trim() || "/", https, user: user.trim(), password },
+        })
+          .then((result) => {
+            if (!result.ok) {
+              setNote(result.message);
+              return;
+            }
+            const hour = currentHour();
+            record({
+              id: sampleId("app", selected.name, hour),
+              kind: "app",
+              target: selected.name,
+              hour,
+              up: result.up,
+              performance: result.performance,
+              source: result.source,
+              detail: result.detail,
+            });
+            setPassword("");
+            setNote(result.detail);
+          })
+          .catch((error: unknown) => {
+            setNote(error instanceof Error ? error.message : "The reading failed.");
+          })
+          .finally(() => setBusy(false));
+      }}
+    >
+      <Field label="Application">
+        <Select value={selected.id} onChange={(event) => setId(event.target.value)}>
+          {apps.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.kind}</option>)}
+        </Select>
+      </Field>
+      <Field label="Address">
+        <input className={fieldClass} value={host} onChange={(event) => setHost(event.target.value)} />
+      </Field>
+      <Field label="Port">
+        <input className={fieldClass} value={port} onChange={(event) => setPort(event.target.value)} />
+      </Field>
+      <Field label="Path">
+        <input className={fieldClass} value={path} onChange={(event) => setPath(event.target.value)} />
+      </Field>
+      <Field label="Login">
+        <input className={fieldClass} value={user} autoComplete="off" onChange={(event) => setUser(event.target.value)} placeholder="Tomcat manager user" />
+      </Field>
+      <Field label="Password">
+        <input className={fieldClass} type="password" value={password} autoComplete="new-password" onChange={(event) => setPassword(event.target.value)} />
+      </Field>
+      <div className="flex flex-wrap items-center gap-3 md:col-span-3">
+        <Button variant="primary" type="submit" disabled={busy}>{busy ? "Reading…" : "Read application"}</Button>
+        <label className="flex items-center gap-2 text-sm text-ink">
+          <input type="checkbox" checked={https} onChange={(event) => setHttps(event.target.checked)} />
+          HTTPS
+        </label>
+        <p className="text-xs text-muted">{appReading(selected.kind)} The password is used for this reading only and is not saved. Private certificates are accepted.</p>
+      </div>
+      {note && <p className="text-sm text-ink md:col-span-3">{note}</p>}
+    </form>
   );
 }
 

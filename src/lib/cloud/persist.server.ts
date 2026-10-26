@@ -25,6 +25,7 @@ import type {
   WorkloadDatabase,
 } from "@/lib/cloud/model";
 import type { DrAlertRow, DrApp, DrAudit, DrCluster, DrDatabase, DrHost, DrPerf, DrService, DrSignal, DrVm, DrWorkflow } from "@/lib/cloud/dr";
+import type { WorkloadSample } from "@/lib/cloud/uptime";
 
 export type ConsolePayload = {
   v: 1;
@@ -57,6 +58,7 @@ type CloudSnap = {
   hosts?: PhysicalHost[];
   workloadApps?: WorkloadApp[];
   workloadDatabases?: WorkloadDatabase[];
+  workloadSamples?: WorkloadSample[];
   snmp?: SnmpConfig;
   appSubnet?: string;
   appAddress?: string;
@@ -114,6 +116,7 @@ export async function writeConsole(payload: ConsolePayload): Promise<void> {
     await replaceRows(sql, "instances", INSTANCE_COLS, (cloud.instances ?? []).map(instanceRow));
     await replaceRows(sql, "workload_apps", WORKLOAD_APP_COLS, (cloud.workloadApps ?? []).map(workloadAppRow));
     await replaceRows(sql, "workload_databases", WORKLOAD_DB_COLS, (cloud.workloadDatabases ?? []).map(workloadDbRow));
+    await replaceRows(sql, "workload_samples", SAMPLE_COLS, (cloud.workloadSamples ?? []).map(sampleRow));
     await replaceRows(sql, "backup_jobs", BACKUP_COLS, (cloud.backups ?? []).map(backupRow));
     await replaceRows(sql, "report_defs", REPORT_COLS, (cloud.reports ?? []).map(reportRow));
     await replaceRows(sql, "san_switches", SWITCH_COLS, (cloud.switches ?? []).map(switchRow));
@@ -187,6 +190,7 @@ async function assemble(): Promise<ConsolePayload> {
       hosts: (await sql<Record<string, unknown>>`select * from physical_hosts order by name`).map(hostFrom),
       workloadApps: (await sql<Record<string, unknown>>`select * from workload_apps order by name`).map(workloadAppFrom),
       workloadDatabases: (await sql<Record<string, unknown>>`select * from workload_databases order by name`).map(workloadDbFrom),
+      workloadSamples: (await sql<Record<string, unknown>>`select * from workload_samples order by hour`).map(sampleFrom),
     },
     dr: {
       services: (await sql<Record<string, unknown>>`select * from dr_services order by name`).map(drServiceFrom),
@@ -226,10 +230,11 @@ const COLLECTOR_COLS = ["id", "name", "scope", "interval", "status"];
 const HOST_COLS = ["id", "name", "site", "cluster_name", "status", "cpu", "mem", "ip"];
 const WORKLOAD_APP_COLS = ["id", "name", "kind", "service_name", "vm_id", "host_id", "port", "status"];
 const WORKLOAD_DB_COLS = ["id", "name", "engine", "service_name", "vm_id", "host_id", "status"];
-const DR_SERVICE_COLS = ["id", "name", "site", "standby_site", "tier", "status", "mode", "rpo", "rto", "owner"];
+const SAMPLE_COLS = ["id", "kind", "target", "hour", "up", "performance", "source", "detail"];
+const DR_SERVICE_COLS = ["id", "name", "site", "standby_site", "tier", "status", "mode", "rpo", "rto", "owner", "service_ip", "owner_vm_id", "owner_source", "owner_checked_at"];
 const DR_HOST_COLS = ["id", "name", "site", "pair", "status", "cpu", "mem", "ip"];
 const DR_CLUSTER_COLS = ["id", "name", "site", "kind", "nodes", "status"];
-const DR_VM_COLS = ["id", "name", "host_id", "cluster_id", "site", "status", "cpu", "mem", "ip"];
+const DR_VM_COLS = ["id", "name", "host_id", "cluster_id", "site", "status", "cpu", "mem", "ip", "mac"];
 const DR_APP_COLS = ["id", "name", "kind", "service_id", "vm_id", "port", "status"];
 const DR_DB_COLS = ["id", "name", "engine", "service_id", "vm_id", "replica", "status"];
 const DR_WF_COLS = ["id", "service_id", "name", "mode", "steps", "last_run", "status", "step_state"];
@@ -304,8 +309,12 @@ function workloadAppRow(row: WorkloadApp) {
 function workloadDbRow(row: WorkloadDatabase) {
   return [row.id, row.name, row.engine, row.serviceName, row.vmId || null, row.hostId || null, row.status];
 }
+function sampleRow(row: WorkloadSample) {
+  return [row.id, row.kind, row.target, row.hour, row.up, row.performance, row.source, row.detail];
+}
 function drServiceRow(row: DrService) {
-  return [row.id, row.name, row.site, row.standbySite, row.tier, row.status, row.mode, row.rpo, row.rto, row.owner];
+  const source = row.ownerSource === "cluster" || row.ownerSource === "mac" ? row.ownerSource : "unconfirmed";
+  return [row.id, row.name, row.site, row.standbySite, row.tier, row.status, row.mode, row.rpo, row.rto, row.owner, row.serviceIp ?? "", row.ownerVmId || null, source, row.ownerCheckedAt ?? ""];
 }
 function drHostRow(row: DrHost) {
   return [row.id, row.name, row.site, row.pair, row.status, row.cpu, row.mem, row.ip];
@@ -314,7 +323,7 @@ function drClusterRow(row: DrCluster) {
   return [row.id, row.name, row.site, row.kind, row.nodes, row.status];
 }
 function drVmRow(row: DrVm) {
-  return [row.id, row.name, row.hostId, row.clusterId, row.site, row.status, row.cpu, row.mem, row.ip];
+  return [row.id, row.name, row.hostId, row.clusterId, row.site, row.status, row.cpu, row.mem, row.ip, row.mac ?? ""];
 }
 function drAppRow(row: DrApp) {
   return [row.id, row.name, row.kind, row.serviceId, row.vmId, row.port, row.status];
@@ -461,8 +470,37 @@ function workloadAppFrom(row: Record<string, unknown>): WorkloadApp {
 function workloadDbFrom(row: Record<string, unknown>): WorkloadDatabase {
   return { id: str(row.id), name: str(row.name), engine: str(row.engine), serviceName: str(row.service_name), vmId: row.vm_id == null ? null : str(row.vm_id), hostId: row.host_id == null ? null : str(row.host_id), status: str(row.status) as WorkloadDatabase["status"] };
 }
+function sampleFrom(row: Record<string, unknown>): WorkloadSample {
+  const kind = str(row.kind);
+  return {
+    id: str(row.id),
+    kind: kind === "app" || kind === "database" || kind === "service" ? kind : "service",
+    target: str(row.target),
+    hour: str(row.hour),
+    up: Number(row.up) === 1 ? 1 : 0,
+    performance: Number(row.performance),
+    source: str(row.source),
+    detail: str(row.detail),
+  };
+}
 function drServiceFrom(row: Record<string, unknown>): DrService {
-  return { id: str(row.id), name: str(row.name), site: str(row.site) as DrService["site"], standbySite: str(row.standby_site) as DrService["standbySite"], tier: str(row.tier), status: str(row.status) as DrService["status"], mode: str(row.mode) as DrService["mode"], rpo: str(row.rpo), rto: str(row.rto), owner: str(row.owner) };
+  const source = str(row.owner_source);
+  return {
+    id: str(row.id),
+    name: str(row.name),
+    site: str(row.site) as DrService["site"],
+    standbySite: str(row.standby_site) as DrService["standbySite"],
+    tier: str(row.tier),
+    status: str(row.status) as DrService["status"],
+    mode: str(row.mode) as DrService["mode"],
+    rpo: str(row.rpo),
+    rto: str(row.rto),
+    owner: str(row.owner),
+    serviceIp: str(row.service_ip),
+    ownerVmId: row.owner_vm_id == null || str(row.owner_vm_id) === "" ? null : str(row.owner_vm_id),
+    ownerSource: source === "cluster" || source === "mac" ? source : "unconfirmed",
+    ownerCheckedAt: str(row.owner_checked_at),
+  };
 }
 function drHostFrom(row: Record<string, unknown>): DrHost {
   return { id: str(row.id), name: str(row.name), site: str(row.site) as DrHost["site"], pair: str(row.pair), status: str(row.status) as DrHost["status"], cpu: Number(row.cpu), mem: Number(row.mem), ip: str(row.ip) };
@@ -471,7 +509,7 @@ function drClusterFrom(row: Record<string, unknown>): DrCluster {
   return { id: str(row.id), name: str(row.name), site: str(row.site) as DrCluster["site"], kind: str(row.kind) as DrCluster["kind"], nodes: Number(row.nodes), status: str(row.status) as DrCluster["status"] };
 }
 function drVmFrom(row: Record<string, unknown>): DrVm {
-  return { id: str(row.id), name: str(row.name), hostId: str(row.host_id), clusterId: str(row.cluster_id), site: str(row.site) as DrVm["site"], status: str(row.status) as DrVm["status"], cpu: Number(row.cpu), mem: Number(row.mem), ip: str(row.ip) };
+  return { id: str(row.id), name: str(row.name), hostId: str(row.host_id), clusterId: str(row.cluster_id), site: str(row.site) as DrVm["site"], status: str(row.status) as DrVm["status"], cpu: Number(row.cpu), mem: Number(row.mem), ip: str(row.ip), mac: str(row.mac) };
 }
 function drAppFrom(row: Record<string, unknown>): DrApp {
   return { id: str(row.id), name: str(row.name), kind: str(row.kind) as DrApp["kind"], serviceId: str(row.service_id), vmId: str(row.vm_id), port: Number(row.port), status: str(row.status) as DrApp["status"] };

@@ -29,6 +29,7 @@ const CLOUD_KEYS = [
   "hosts",
   "workloadApps",
   "workloadDatabases",
+  "workloadSamples",
   "snmp",
   "appSubnet",
   "appAddress",
@@ -92,6 +93,7 @@ function apply(payload: ConsolePayload) {
   useCloud.setState(payload.cloud as object);
   useDr.setState(payload.dr as object);
   useDr.getState().resumeRuns();
+  useCloud.getState().captureWorkloads();
 }
 
 export function useConsolePersistence() {

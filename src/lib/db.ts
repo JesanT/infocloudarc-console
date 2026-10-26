@@ -115,13 +115,14 @@ async function createPgliteSql(): Promise<Sql> {
     const { mkdirSync } = await import("node:fs");
     const { createRequire } = await import("node:module");
     const { join } = await import("node:path");
-    const { pathToFileURL } = await import("node:url");
     // Load the package from node_modules. Bundling it makes Node look for
     // pglite.data next to the server chunk, which is not copied, and the
     // production server exits.
     const require = createRequire(join(process.cwd(), "package.json"));
     const entry = require.resolve("@electric-sql/pglite");
-    const { PGlite } = (await import(pathToFileURL(entry).href)) as typeof import("@electric-sql/pglite");
+    // Require the package. A dynamic import of the same file is evaluated as
+    // ESM by the dev server and crashes because the build is CommonJS.
+    const { PGlite } = require(entry) as typeof import("@electric-sql/pglite");
     const dataDir = join(process.cwd(), "data", "pglite");
     mkdirSync(dataDir, { recursive: true });
     const pg = new PGlite({

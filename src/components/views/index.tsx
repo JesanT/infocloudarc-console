@@ -1,5 +1,5 @@
 import { Dashboard } from "@/components/views/dashboard";
-import { ClustersView, DatabasesView, InstanceOpsView, InstancesView, LoadBalancersView, ServicesView } from "@/components/views/compute";
+import { ApplicationsView, ClustersView, DatabasesView, InstanceOpsView, InstancesView, LoadBalancersView, ServicesView } from "@/components/views/compute";
 import {
   BackupJobs,
   BackupRepos,
@@ -25,6 +25,8 @@ export function View({ id }: { id: string }) {
       return <Dashboard />;
     case "services":
       return <ServicesView />;
+    case "applications":
+      return <ApplicationsView />;
     case "databases":
       return <DatabasesView />;
     case "loadbalancers":
