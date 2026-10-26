@@ -35,6 +35,9 @@ export type Instance = {
   ip: string;
   kind: "Compute" | "Database" | "Load Balancer" | "Backup";
   os: string;
+  inMbps?: number;
+  outMbps?: number;
+  connections?: number;
 };
 
 export type InventoryItem = {
@@ -177,7 +180,7 @@ export const INSTANCES: Instance[] = [
   { id: "vm-001", name: "web-prod-01", site: "east", status: "running", cpu: 45, mem: 62, ip: "10.10.1.21", kind: "Compute", os: "Ubuntu 22.04" },
   { id: "vm-002", name: "db-primary", site: "east", status: "running", cpu: 78, mem: 85, ip: "10.10.1.50", kind: "Database", os: "RHEL 9" },
   { id: "vm-003", name: "app-worker-02", site: "west", status: "stopped", cpu: 0, mem: 0, ip: "10.20.2.15", kind: "Compute", os: "Ubuntu 22.04" },
-  { id: "vm-004", name: "lb-frontend", site: "east", status: "running", cpu: 22, mem: 35, ip: "10.10.1.10", kind: "Load Balancer", os: "HAProxy" },
+  { id: "vm-004", name: "lb-frontend", site: "east", status: "running", cpu: 22, mem: 35, ip: "10.10.1.10", kind: "Load Balancer", os: "HAProxy", inMbps: 640, outMbps: 610, connections: 1840 },
   { id: "vm-005", name: "backup-proxy", site: "central", status: "running", cpu: 15, mem: 40, ip: "10.30.1.100", kind: "Backup", os: "Ubuntu 22.04" },
   { id: "vm-006", name: "db-replica", site: "west", status: "running", cpu: 41, mem: 58, ip: "10.20.2.50", kind: "Database", os: "RHEL 9" },
 ];
@@ -268,16 +271,16 @@ export const BACKUPS = [
 ];
 
 export const SERVICES = [
-  { name: "edge-gateway", site: "east" as SiteKey, health: "Healthy" as const, instances: 2, note: "Public ingress" },
-  { name: "app-api", site: "east" as SiteKey, health: "Healthy" as const, instances: 4, note: "Stateless API" },
-  { name: "identity", site: "central" as SiteKey, health: "Healthy" as const, instances: 2, note: "Local + AD" },
-  { name: "metrics", site: "west" as SiteKey, health: "Degraded" as const, instances: 1, note: "Scrape lag" },
+  { name: "edge-gateway", site: "east" as SiteKey, health: "Healthy" as const, instances: 2, availability: 99.98, performance: 97, note: "Public ingress" },
+  { name: "app-api", site: "east" as SiteKey, health: "Healthy" as const, instances: 4, availability: 99.95, performance: 93, note: "Stateless API" },
+  { name: "identity", site: "central" as SiteKey, health: "Healthy" as const, instances: 2, availability: 99.99, performance: 96, note: "Local + AD" },
+  { name: "metrics", site: "west" as SiteKey, health: "Degraded" as const, instances: 1, availability: 98.4, performance: 71, note: "Scrape lag" },
 ];
 
 export const CLUSTERS = [
-  { name: "east-compute", site: "east" as SiteKey, nodes: 12, ha: "Healthy" as const, version: "KVM 8.2" },
-  { name: "west-compute", site: "west" as SiteKey, nodes: 8, ha: "Healthy" as const, version: "KVM 8.2" },
-  { name: "central-dr", site: "central" as SiteKey, nodes: 6, ha: "Degraded" as const, version: "KVM 8.1" },
+  { name: "east-compute", site: "east" as SiteKey, nodes: 12, ha: "Healthy" as const, version: "Hyper-V 2022", availability: 99.99, performance: 94 },
+  { name: "west-compute", site: "west" as SiteKey, nodes: 8, ha: "Healthy" as const, version: "Hyper-V 2022", availability: 99.95, performance: 92 },
+  { name: "central-dr", site: "central" as SiteKey, nodes: 6, ha: "Degraded" as const, version: "Hyper-V 2019", availability: 98.1, performance: 74 },
 ];
 
 export const SWITCHES = [
@@ -311,7 +314,8 @@ export const VIEW_TITLES: Record<string, string> = {
   databases: "Databases",
   loadbalancers: "Load balancers",
   clusters: "Clusters",
-  instances: "Instances",
+  instances: "Instance overview",
+  "instance-ops": "Instance operations",
   "net-discovery": "Network discovery",
   "net-topology": "Network topology",
   "net-monitoring": "Network monitoring",

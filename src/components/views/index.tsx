@@ -1,5 +1,5 @@
 import { Dashboard } from "@/components/views/dashboard";
-import { ClustersView, InstancesView, KindView, ServicesView } from "@/components/views/compute";
+import { ClustersView, DatabasesView, InstanceOpsView, InstancesView, LoadBalancersView, ServicesView } from "@/components/views/compute";
 import {
   BackupJobs,
   BackupRepos,
@@ -26,13 +26,15 @@ export function View({ id }: { id: string }) {
     case "services":
       return <ServicesView />;
     case "databases":
-      return <KindView kind="Database" title="Databases" />;
+      return <DatabasesView />;
     case "loadbalancers":
-      return <KindView kind="Load Balancer" title="Load balancers" />;
+      return <LoadBalancersView />;
     case "clusters":
       return <ClustersView />;
     case "instances":
       return <InstancesView />;
+    case "instance-ops":
+      return <InstanceOpsView />;
     case "net-discovery":
       return <NetworkView mode="discovery" />;
     case "net-topology":

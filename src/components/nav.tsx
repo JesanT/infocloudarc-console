@@ -15,6 +15,7 @@ import {
   Monitor,
   Network,
   Plus,
+  Power,
   Receipt,
   Scale,
   ScrollText,
@@ -42,7 +43,15 @@ const NAV: NavNode[] = [
       { id: "databases", label: "Databases", icon: Database },
       { id: "loadbalancers", label: "Load balancers", icon: Scale },
       { id: "clusters", label: "Clusters", icon: Boxes },
-      { id: "instances", label: "Instances", icon: Monitor },
+      {
+        id: "instances-group",
+        label: "Instances",
+        icon: Monitor,
+        items: [
+          { id: "instances", label: "Overview", icon: Monitor },
+          { id: "instance-ops", label: "Operations", icon: Power },
+        ],
+      },
     ],
   },
   {
