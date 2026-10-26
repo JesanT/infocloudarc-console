@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Button, Empty, Field, Kpi, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
-import { inScope, matches, siteLabel } from "@/lib/cloud/model";
+import { activityVisible, inScope, matches, siteLabel } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
 
 export function RepositoryView() {
@@ -271,7 +271,7 @@ function compose(
   return {
     title: "Audit activity",
     columns: ["Event", "When"],
-    rows: source.activity.map((item) => [item.text, item.when]),
+    rows: source.activity.filter((item) => activityVisible(item.text, role, site)).map((item) => [item.text, item.when]),
   };
 }
 

@@ -214,10 +214,58 @@ export function siteLabel(site: Scope | SiteFilter): string {
   return found ? `${found.name} (${found.code})` : site;
 }
 
+export function boundSite(role: Role, filter: SiteFilter): SiteKey | "all" {
+  if (role === "site") {
+    if (filter === "east" || filter === "west" || filter === "central") return filter;
+    return "east";
+  }
+  return filter;
+}
+
 export function inScope(role: Role, filter: SiteFilter, itemSite: Scope): boolean {
-  if (role === "site") return itemSite === "east";
-  if (filter === "all") return true;
-  return itemSite === filter || itemSite === "global";
+  const bound = boundSite(role, filter);
+  if (bound === "all") return true;
+  if (role === "site") return itemSite === bound;
+  return itemSite === bound || itemSite === "global";
+}
+
+export function canMutateSite(role: Role, filter: SiteFilter, itemSite: Scope): boolean {
+  if (role === "vendor" || role === "global") return true;
+  const bound = boundSite(role, filter);
+  return bound !== "all" && itemSite === bound;
+}
+
+export function siteOptions(role: Role, filter: SiteFilter): SiteKey[] {
+  const bound = boundSite(role, filter);
+  if (bound === "east" || bound === "west" || bound === "central") return [bound];
+  return ["east", "west", "central"];
+}
+
+export function mentionsSite(text: string, site: SiteKey): boolean {
+  return text.toLowerCase().includes(site);
+}
+
+export function operatorVisible(sites: string, role: Role, filter: SiteFilter): boolean {
+  const bound = boundSite(role, filter);
+  if (bound === "all") return true;
+  if (role === "site") return mentionsSite(sites, bound);
+  return /\ball\b/i.test(sites) || mentionsSite(sites, bound);
+}
+
+export function policyVisible(scope: string, role: Role, filter: SiteFilter): boolean {
+  const bound = boundSite(role, filter);
+  if (bound === "all") return true;
+  if (/all sites/i.test(scope)) return true;
+  return mentionsSite(scope, bound);
+}
+
+export function activityVisible(text: string, role: Role, filter: SiteFilter): boolean {
+  const bound = boundSite(role, filter);
+  if (bound === "all") return true;
+  const hits = (["east", "west", "central"] as const).filter((id) => mentionsSite(text, id));
+  if (hits.length === 0) return role !== "site";
+  if (role === "site") return hits.length === 1 && hits[0] === bound;
+  return hits.includes(bound);
 }
 
 export function tone(status: string): "ok" | "warn" | "danger" | "info" {

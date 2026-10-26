@@ -20,6 +20,9 @@ import {
   WORKLOAD_APPS,
   WORKLOAD_DATABASES,
   completeAsset,
+  canMutateSite,
+  inScope,
+  siteLabel,
   type Activity,
   type BackupJob,
   type BackupPolicy,
@@ -114,7 +117,7 @@ type CloudState = {
   extraSubnets: string[];
   pollTick: number;
   lastPollAt: number;
-  setRole: (role: Role) => void;
+  setRole: (role: Role, home?: SiteKey) => void;
   setSite: (site: SiteFilter) => void;
   setView: (view: string) => void;
   setQuery: (query: string) => void;
@@ -160,9 +163,9 @@ type CloudState = {
 
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 
-function canOperate(role: Role, itemSite: SiteKey): boolean {
-  if (role === "vendor" || role === "global") return true;
-  return itemSite === "east";
+function canOperate(get: () => CloudState, itemSite: SiteKey): boolean {
+  const { role, site } = get();
+  return canMutateSite(role, site, itemSite);
 }
 
 export const useCloud = create<CloudState>((set, get) => ({
@@ -200,12 +203,19 @@ export const useCloud = create<CloudState>((set, get) => ({
   extraSubnets: [],
   pollTick: 0,
   lastPollAt: 0,
-  setRole: (role) =>
-    set({
-      role,
-      site: role === "site" ? "east" : get().site,
-    }),
-  setSite: (site) => set({ site }),
+  setRole: (role, home) => {
+    if (role === "site") {
+      const current = home ?? get().site;
+      const site = current === "east" || current === "west" || current === "central" ? current : "east";
+      set({ role, site });
+      return;
+    }
+    set({ role });
+  },
+  setSite: (site) => {
+    if (get().role === "site") return;
+    set({ site });
+  },
   setView: (view) => set({ view, navOpen: false, query: "" }),
   setQuery: (query) => set({ query }),
   setNavOpen: (navOpen) => set({ navOpen }),
@@ -218,8 +228,8 @@ export const useCloud = create<CloudState>((set, get) => ({
     const { role, instances, flash, activity } = get();
     const vm = instances.find((item) => item.id === id);
     if (!vm) return;
-    if (!canOperate(role, vm.site)) {
-      flash("Site access cannot change workloads outside Site-East.");
+    if (!canOperate(get, vm.site)) {
+      flash(`Site access cannot change workloads outside ${siteLabel(get().site === "all" ? "east" : get().site)}.`);
       return;
     }
     const status = action === "restart" ? "running" : "stopped";
@@ -230,7 +240,7 @@ export const useCloud = create<CloudState>((set, get) => ({
           ? { ...item, status, cpu: status === "running" ? Math.max(item.cpu, 12) : 0, mem: status === "running" ? Math.max(item.mem, 20) : 0 }
           : item,
       ),
-      activity: [{ id: `a-${Date.now()}`, text: `${verb} ${vm.name}`, when: "now" }, ...activity].slice(0, 8),
+      activity: [{ id: `a-${Date.now()}`, text: `${verb} ${vm.name} (${siteLabel(vm.site)})`, when: "now" }, ...activity].slice(0, 8),
     });
     flash(`${verb} ${vm.name}.`);
   },
@@ -304,6 +314,10 @@ export const useCloud = create<CloudState>((set, get) => ({
     get().flash(added ? `Imported ${added} assets. Duplicates skipped.` : "No new assets. Every row was already in inventory.");
   },
   discoverIntoInventory: (cidr, live) => {
+    if (get().role === "site") {
+      get().flash("Site access cannot run discovery.");
+      return;
+    }
     const address = get().appAddress;
     const rows = [...catalogFor(cidr)];
     for (const host of live) {
@@ -344,14 +358,24 @@ export const useCloud = create<CloudState>((set, get) => ({
     }
     set({ extraSubnets: [...get().extraSubnets, value] });
   },
-  setSnmp: (patch) => set({ snmp: { ...get().snmp, ...patch } }),
+  setSnmp: (patch) => {
+    if (get().role === "site") {
+      get().flash("Site access cannot change monitoring credentials.");
+      return;
+    }
+    set({ snmp: { ...get().snmp, ...patch } });
+  },
   poll: () => {
     const state = get();
     const tick = state.pollTick + 1;
-    const result = runPoll(state.inventory, state.ports, tick, state.snmp);
+    const selected = state.inventory.filter((item) => inScope(state.role, state.site, item.site));
+    const selectedIds = new Set(selected.map((item) => item.id));
+    const selectedPorts = state.ports.filter((port) => selectedIds.has(port.assetId));
+    const result = runPoll(selected, selectedPorts, tick, state.snmp);
+    const returned = new Set(result.ports.map((port) => port.id));
     set({
-      inventory: result.inventory,
-      ports: result.ports,
+      inventory: [...result.inventory, ...state.inventory.filter((item) => !selectedIds.has(item.id))],
+      ports: [...result.ports, ...state.ports.filter((port) => !returned.has(port.id) && !selectedIds.has(port.assetId))],
       alerts: [...result.alerts, ...state.alerts].slice(0, 40),
       events: [...result.events, ...state.events].slice(0, 40),
       pollTick: tick,
@@ -366,6 +390,11 @@ export const useCloud = create<CloudState>((set, get) => ({
   acknowledgePort: (id) => {
     const port = get().ports.find((item) => item.id === id);
     if (!port) return;
+    const asset = get().inventory.find((item) => item.id === port.assetId);
+    if (asset && !canMutateSite(get().role, get().site, asset.site)) {
+      get().flash("Site access cannot acknowledge ports outside its site.");
+      return;
+    }
     if (port.oper !== "down") {
       get().flash("That port is up. Nothing to acknowledge.");
       return;
@@ -383,11 +412,15 @@ export const useCloud = create<CloudState>((set, get) => ({
     const { repositories, flash, activity } = get();
     const repo = repositories.find((item) => item.id === id);
     if (!repo) return;
+    if (!canMutateSite(get().role, get().site, repo.site)) {
+      flash("Site access cannot sync a repository outside its site.");
+      return;
+    }
     set({
       repositories: repositories.map((item) =>
         item.id === id ? { ...item, status: "Healthy", lastSync: "Just now" } : item,
       ),
-      activity: [{ id: `a-${Date.now()}`, text: `Synced repository ${repo.name}`, when: "now" }, ...activity].slice(0, 8),
+      activity: [{ id: `a-${Date.now()}`, text: `Synced repository ${repo.name} (${siteLabel(repo.site)})`, when: "now" }, ...activity].slice(0, 8),
     });
     flash(`Synced ${repo.name}.`);
   },
@@ -590,9 +623,10 @@ export const useCloud = create<CloudState>((set, get) => ({
 }));
 
 function allowSite(get: () => CloudState, site: SiteKey): boolean {
-  const { role, flash } = get();
-  if (role === "site" && site !== "east") {
-    flash("Site access can change Site-East only.");
+  const { role, site: filter, flash } = get();
+  if (!canMutateSite(role, filter, site)) {
+    const home = filter === "east" || filter === "west" || filter === "central" ? filter : "east";
+    flash(`Site access can change ${siteLabel(home)} only.`);
     return false;
   }
   return true;

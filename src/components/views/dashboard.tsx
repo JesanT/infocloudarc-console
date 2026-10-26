@@ -2,9 +2,11 @@ import { Kpi, Panel, StatusPill } from "@/components/ui";
 import { Trend } from "@/components/charts";
 import { isPolled } from "@/lib/cloud/fabric";
 import {
+  activityVisible,
+  boundSite,
   inScope,
+  operatorVisible,
   siteLabel,
-  type SiteKey,
 } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
 
@@ -43,13 +45,11 @@ export function Dashboard() {
   const arrays = useCloud((s) => s.arrays).filter((item) => inScope(role, site, item.site));
   const jobs = useCloud((s) => s.backups).filter((item) => inScope(role, site, item.site));
   const reports = useCloud((s) => s.reports);
-  const users = useCloud((s) => s.operators).filter((user) => {
-    if (role === "site") return user.sites === "Site-East";
-    if (site === "west") return user.sites !== "Site-East";
-    if (site === "east") return user.sites !== "Site-West";
-    if (site === "central") return user.sites === "All";
-    return true;
-  });
+  const targets = useCloud((s) => s.backupTargets).filter((item) => inScope(role, site, item.site));
+  const users = useCloud((s) => s.operators).filter((user) => operatorVisible(user.sites, role, site));
+  const visibleAlerts = alerts.filter((item) => inventory.some((asset) => asset.id === item.assetId));
+  const activityRows = activity.filter((item) => activityVisible(item.text, role, site));
+  const viewing = boundSite(role, site);
 
   const running = instances.filter((item) => item.status === "running");
   const databases = instances.filter((item) => item.kind === "Database");
@@ -62,13 +62,13 @@ export function Dashboard() {
   const jobWarnings = jobs.filter((item) => item.status !== "Success").length;
   const licenseWatch = subscriptions.filter((item) => item.status !== "Active");
   const repoWatch = repositories.filter((item) => item.status !== "Healthy").length;
-  const sitesInView = role === "site" || site !== "all" ? 1 : 3;
+  const sitesInView = viewing === "all" ? 3 : 1;
   const attention = [
     ...instances.filter((item) => item.status !== "running").map((item) => `${item.name} is stopped`),
     ...inventory.filter((item) => item.status !== "Online").map((item) => `${item.name} is ${item.status.toLowerCase()}`),
     ...jobs.filter((item) => item.status !== "Success").map((item) => `${item.job} backup ${item.status.toLowerCase()}`),
     ...licenseWatch.map((item) => `${item.module} license ${item.status.toLowerCase()} (${siteLabel(item.site)})`),
-    ...alerts.slice(0, 3).map((item) => item.message),
+    ...visibleAlerts.slice(0, 3).map((item) => item.message),
   ].slice(0, 6);
 
   const overall = worst([
@@ -98,7 +98,7 @@ export function Dashboard() {
         ["net-discovery", "Discovery", `${network.length} enrolled`, network.length ? "Healthy" : "Warning"],
         ["net-topology", "Topology", `${network.filter((item) => item.parentId).length} links`, worst(network.map((item) => item.status))],
         ["net-monitoring", "Monitoring", `${portsUp} up / ${portsDown} down`, portsDown > 0 ? "Warning" : "Healthy"],
-        ["net-diagnostics", "Diagnostics", alerts.length ? `${alerts.length} open` : "No open alerts", alerts.some((item) => item.severity === "major") ? "Critical" : alerts.length ? "Warning" : "Healthy"],
+        ["net-diagnostics", "Diagnostics", visibleAlerts.length ? `${visibleAlerts.length} open` : "No open alerts", visibleAlerts.some((item) => item.severity === "major") ? "Critical" : visibleAlerts.length ? "Warning" : "Healthy"],
       ],
     },
     {
@@ -111,16 +111,16 @@ export function Dashboard() {
     {
       title: "Monitoring",
       rows: [
-        ["mon-config", "Configuration", "3 collectors, 15–60s", "Active"],
-        ["mon-site", "Site view", site === "all" && role !== "site" ? "3 sites" : "1 site", "Healthy"],
-        ["mon-global", "Global view", role === "site" ? "Own site only" : "All entitled sites", role === "site" ? "Warning" : "Healthy"],
+        ["mon-config", "Configuration", "Collectors, 15–60s", "Active"],
+        ["mon-site", "Site view", viewing === "all" ? "3 sites" : siteLabel(viewing), "Healthy"],
+        ...(role === "site" ? [] : [["mon-global", "Global view", viewing === "all" ? "All sites" : siteLabel(viewing), "Healthy"] as [string, string, string, string]]),
       ],
     },
     {
       title: "Backup and restore",
       rows: [
         ["backup-jobs", "Jobs", `${jobs.length - jobWarnings} success, ${jobWarnings} warning`, jobWarnings ? "Warning" : "Healthy"],
-        ["backup-repos", "Repositories", "East, West, Central", site === "central" || site === "all" ? "Warning" : "Healthy"],
+        ["backup-repos", "Repositories", targets.length ? targets.map((item) => item.name).join(", ") : "None", targets.some((item) => item.status !== "Online") ? "Warning" : "Healthy"],
         ["backup-restore", "Restore", "14–48 recovery points", "Healthy"],
         ["backup-policies", "Policies", "Gold, database, file", "Healthy"],
       ],
@@ -135,8 +135,8 @@ export function Dashboard() {
     {
       title: "Licensing",
       rows: [
-        ["licensing", "Site licenses", `${subscriptions.filter((item) => item.scope === "Site").length} active scopes`, worst(subscriptions.filter((item) => item.scope === "Site").map((item) => item.status))],
-        ["licensing", "Global license", subscriptions.some((item) => item.scope === "Global" && item.status === "Active") ? "Multi-site entitled" : "Check coverage", "Healthy"],
+        ["licensing", "Site licenses", `${subscriptions.filter((item) => item.scope === "Site").length} in view`, worst(subscriptions.filter((item) => item.scope === "Site").map((item) => item.status))],
+        ...(role === "site" ? [] : [["licensing", "Global license", subscriptions.some((item) => item.scope === "Global" && item.status === "Active") ? "Multi-site entitled" : "Check coverage", "Healthy"] as [string, string, string, string]]),
         ["subscriptions", "Module licenses", `${subscriptions.length} modules`, worst(subscriptions.map((item) => item.status))],
       ],
     },
@@ -239,14 +239,14 @@ export function Dashboard() {
         </Panel>
         <Panel title="Recent activity">
           <ul className="space-y-3">
-            {activity.map((item) => (
+            {activityRows.map((item) => (
               <li key={item.id} className="flex items-start justify-between gap-3 text-sm">
                 <span>{item.text}</span>
                 <span className="shrink-0 font-mono text-xs text-faint">{item.when}</span>
               </li>
             ))}
           </ul>
-          <p className="mt-3 text-xs text-faint">Sites: {(["east", "west", "central"] as SiteKey[]).filter((id) => role !== "site" && (site === "all" || site === id) || (role === "site" && id === "east")).map((id) => siteLabel(id)).join(" · ")}</p>
+          <p className="mt-3 text-xs text-faint">Sites: {viewing === "all" ? "Site-East · Site-West · Site-Central" : siteLabel(viewing)}</p>
         </Panel>
       </div>
     </div>

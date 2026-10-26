@@ -41,6 +41,9 @@ export function NetworkView({ mode }: { mode: "discovery" | "topology" | "monito
   const devices = inventory.filter(
     (item) => isPolled(item) && inScope(role, site, item.site) && matches(query, [item.name, item.ip, item.sysDescr]),
   );
+  const scopedIds = new Set(inventory.filter((item) => inScope(role, site, item.site)).map((item) => item.id));
+  const scopedAlerts = alerts.filter((item) => scopedIds.has(item.assetId));
+  const scopedEvents = events.filter((item) => scopedIds.has(item.assetId));
   const up = ports.filter((port) => devices.some((item) => item.id === port.assetId) && port.oper === "up").length;
   const down = ports.filter((port) => devices.some((item) => item.id === port.assetId) && port.oper === "down").length;
 
@@ -50,25 +53,28 @@ export function NetworkView({ mode }: { mode: "discovery" | "topology" | "monito
         <Kpi label="Devices" value={String(devices.length)} />
         <Kpi label="Ports up" value={String(up)} />
         <Kpi label="Ports down" value={String(down)} />
-        <Kpi label="Alerts" value={String(alerts.length)} />
+        <Kpi label="Alerts" value={String(scopedAlerts.length)} />
       </div>
       {mode === "discovery" && <DiscoveryPanel />}
       {mode === "topology" && <Topology devices={devices} />}
       {mode === "monitoring" && <Monitoring devices={devices} ports={ports} />}
-      {mode === "diagnostics" && <Diagnostics alerts={alerts} events={events} />}
+      {mode === "diagnostics" && <Diagnostics alerts={scopedAlerts} events={scopedEvents} />}
       {(mode === "topology" || mode === "monitoring") && <Faceplate devices={devices} ports={ports} />}
     </div>
   );
 }
 
 function DiscoveryPanel() {
+  const role = useCloud((s) => s.role);
+  const site = useCloud((s) => s.site);
   const snmp = useCloud((s) => s.snmp);
   const setSnmp = useCloud((s) => s.setSnmp);
-  const devices = useCloud((s) => s.inventory).filter(isPolled);
+  const locked = role === "site";
+  const devices = useCloud((s) => s.inventory).filter((item) => isPolled(item) && inScope(role, site, item.site));
   return (
     <Panel
       title="LibreNMS poller"
-      subtitle="Devices enrolled from inventory are polled for status, ports, and traffic every minute over the selected SNMP version."
+      subtitle={locked ? "Devices on your site. Credential changes are limited to global and vendor access." : "Devices enrolled from inventory are polled for status, ports, and traffic every minute over the selected SNMP version."}
       action={<PollBar />}
     >
       <p className="mb-3 text-sm text-muted">
@@ -76,21 +82,21 @@ function DiscoveryPanel() {
       </p>
       <div className="grid gap-3 md:grid-cols-3">
         <Field label="Version">
-          <Select value={snmp.version} onChange={(event) => setSnmp({ version: event.target.value as SnmpVersion })}>
+          <Select disabled={locked} value={snmp.version} onChange={(event) => setSnmp({ version: event.target.value as SnmpVersion })}>
             <option value="v1">v1</option>
             <option value="v2c">v2c</option>
             <option value="v3">v3</option>
           </Select>
         </Field>
-        <Field label="v1 community"><input className={fieldClass} value={snmp.v1} onChange={(event) => setSnmp({ v1: event.target.value })} /></Field>
-        <Field label="v2c community"><input className={fieldClass} value={snmp.v2c} onChange={(event) => setSnmp({ v2c: event.target.value })} /></Field>
-        <Field label="v3 user"><input className={fieldClass} value={snmp.v3User} onChange={(event) => setSnmp({ v3User: event.target.value })} /></Field>
-        <Field label="v3 auth"><input className={fieldClass} type="password" value={snmp.v3Auth} onChange={(event) => setSnmp({ v3Auth: event.target.value })} /></Field>
-        <Field label="v3 priv"><input className={fieldClass} type="password" value={snmp.v3Priv} onChange={(event) => setSnmp({ v3Priv: event.target.value })} /></Field>
-        <Field label="Email for minor alerts"><input className={fieldClass} value={snmp.notifyEmail} onChange={(event) => setSnmp({ notifyEmail: event.target.value })} /></Field>
-        <Field label="Mobile for major alerts"><input className={fieldClass} value={snmp.notifyMobile} onChange={(event) => setSnmp({ notifyMobile: event.target.value })} /></Field>
+        <Field label="v1 community"><input className={fieldClass} disabled={locked} value={snmp.v1} onChange={(event) => setSnmp({ v1: event.target.value })} /></Field>
+        <Field label="v2c community"><input className={fieldClass} disabled={locked} value={snmp.v2c} onChange={(event) => setSnmp({ v2c: event.target.value })} /></Field>
+        <Field label="v3 user"><input className={fieldClass} disabled={locked} value={snmp.v3User} onChange={(event) => setSnmp({ v3User: event.target.value })} /></Field>
+        <Field label="v3 auth"><input className={fieldClass} disabled={locked} type="password" value={snmp.v3Auth} onChange={(event) => setSnmp({ v3Auth: event.target.value })} /></Field>
+        <Field label="v3 priv"><input className={fieldClass} disabled={locked} type="password" value={snmp.v3Priv} onChange={(event) => setSnmp({ v3Priv: event.target.value })} /></Field>
+        <Field label="Email for minor alerts"><input className={fieldClass} disabled={locked} value={snmp.notifyEmail} onChange={(event) => setSnmp({ notifyEmail: event.target.value })} /></Field>
+        <Field label="Mobile for major alerts"><input className={fieldClass} disabled={locked} value={snmp.notifyMobile} onChange={(event) => setSnmp({ notifyMobile: event.target.value })} /></Field>
       </div>
-      <p className="mt-3 text-sm text-muted">{devices.length} inventory devices are enrolled ({devices.filter((item) => item.librenmsId).length} with a LibreNMS id).</p>
+      <p className="mt-3 text-sm text-muted">{devices.length} inventory devices in this site filter are enrolled ({devices.filter((item) => item.librenmsId).length} with a LibreNMS id).</p>
     </Panel>
   );
 }

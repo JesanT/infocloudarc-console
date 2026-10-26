@@ -1,6 +1,6 @@
 import { Button, Kpi, Panel, Select, StatusPill, Table, TableWrap, Td, Th } from "@/components/ui";
 import { APP_LABEL, DB_LABEL, useDr, type AppKind, type DbKind, type DrService } from "@/lib/cloud/dr";
-import { inScope, matches, siteLabel, type Role, type SiteFilter } from "@/lib/cloud/model";
+import { canMutateSite, inScope, matches, siteLabel, type Role, type SiteFilter } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
 
 type Focus =
@@ -52,11 +52,11 @@ export function ServiceDrView({ focus }: { focus: Focus }) {
   });
   const serviceIds = new Set(serviceRows.map((item) => item.id));
   const vmIds = new Set([...appRows.map((item) => item.vmId), ...dbRows.map((item) => item.vmId)]);
-  const vmRows = vms.filter((vm) => (focus.domain === "all" ? visible.some((service) => service.site === vm.site || service.standbySite === vm.site) : vmIds.has(vm.id)));
+  const vmRows = vms.filter((vm) => inScope(role, site, vm.site) && (focus.domain === "all" ? visible.some((service) => service.site === vm.site || service.standbySite === vm.site) : vmIds.has(vm.id)));
   const hostIds = new Set(vmRows.map((vm) => vm.hostId));
-  const hostRows = hosts.filter((host) => (focus.domain === "all" ? visible.some((service) => service.site === host.site || service.standbySite === host.site) : hostIds.has(host.id)));
+  const hostRows = hosts.filter((host) => inScope(role, site, host.site) && (focus.domain === "all" ? visible.some((service) => service.site === host.site || service.standbySite === host.site) : hostIds.has(host.id)));
   const clusterIds = new Set(vmRows.map((vm) => vm.clusterId));
-  const clusterRows = clusters.filter((cluster) => (focus.domain === "all" ? visible.some((service) => service.site === cluster.site || service.standbySite === cluster.site) : clusterIds.has(cluster.id)));
+  const clusterRows = clusters.filter((cluster) => inScope(role, site, cluster.site) && (focus.domain === "all" ? visible.some((service) => service.site === cluster.site || service.standbySite === cluster.site) : clusterIds.has(cluster.id)));
   const names = new Set([
     ...serviceRows.map((item) => item.name),
     ...appRows.map((item) => item.name),
@@ -65,7 +65,7 @@ export function ServiceDrView({ focus }: { focus: Focus }) {
     ...hostRows.map((item) => item.name),
   ]);
   const flowRows = workflows.filter((item) => serviceIds.has(item.serviceId));
-  const perfRows = performance.filter((item) => names.has(item.target) || focus.domain === "all");
+  const perfRows = performance.filter((item) => names.has(item.target));
   const eventRows = events.filter((item) => names.has(item.target) || serviceRows.some((service) => item.target.includes(service.name)));
   const alertRows = alerts.filter((item) => names.has(item.target) || serviceRows.some((service) => item.message.includes(service.name) || item.target === service.name));
   const auditRows = audit.filter((item) => serviceRows.some((service) => item.target.includes(service.name)));
@@ -102,16 +102,24 @@ export function ServiceDrView({ focus }: { focus: Focus }) {
                   <Td mono>{service.rpo}</Td>
                   <Td mono>{service.rto}</Td>
                   <Td>
-                    <Select aria-label={`${service.name} failover mode`} value={service.mode} onChange={(event) => setMode(service.id, event.target.value as "auto" | "manual")}>
-                      <option value="auto">Automated</option>
-                      <option value="manual">Manual</option>
-                    </Select>
+                    {canMutateSite(role, site, service.site) ? (
+                      <Select aria-label={`${service.name} failover mode`} value={service.mode} onChange={(event) => setMode(service.id, event.target.value as "auto" | "manual")}>
+                        <option value="auto">Automated</option>
+                        <option value="manual">Manual</option>
+                      </Select>
+                    ) : (
+                      service.mode === "auto" ? "Automated" : "Manual"
+                    )}
                   </Td>
                   <Td><StatusPill value={service.status} /></Td>
                   <Td>
-                    <Button variant="primary" onClick={() => runFailover(service.id, service.mode)}>
-                      {service.mode === "auto" ? "Run workflow" : "Fail over"}
-                    </Button>
+                    {canMutateSite(role, site, service.site) ? (
+                      <Button variant="primary" onClick={() => runFailover(service.id, service.mode)}>
+                        {service.mode === "auto" ? "Run workflow" : "Fail over"}
+                      </Button>
+                    ) : (
+                      "View only"
+                    )}
                   </Td>
                 </tr>
               ))}
@@ -195,7 +203,9 @@ export function ServiceDrView({ focus }: { focus: Focus }) {
 }
 
 function touches(role: Role, site: SiteFilter, service: DrService) {
-  return inScope(role, site, service.site) || inScope(role, site, service.standbySite);
+  if (role === "site") return inScope(role, site, service.site);
+  if (site === "all") return true;
+  return service.site === site || service.standbySite === site;
 }
 
 function mapWorkload(

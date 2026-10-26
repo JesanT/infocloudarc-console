@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { SiteKey } from "@/lib/cloud/model";
-import { ROLE_LABEL } from "@/lib/cloud/model";
+import { ROLE_LABEL, canMutateSite, siteLabel } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
 
 export type FailoverMode = "auto" | "manual";
@@ -235,9 +235,8 @@ function nowLabel() {
 }
 
 function allowed(service: DrService): boolean {
-  const { role } = useCloud.getState();
-  if (role === "vendor" || role === "global") return true;
-  return service.site === "east" || service.standbySite === "east";
+  const { role, site } = useCloud.getState();
+  return canMutateSite(role, site, service.site);
 }
 
 export const useDr = create<DrState>((set, get) => ({
@@ -257,7 +256,7 @@ export const useDr = create<DrState>((set, get) => ({
     if (!service) return;
     const cloud = useCloud.getState();
     if (!allowed(service)) {
-      cloud.flash("Site access can change failover only for Site-East services.");
+      cloud.flash(`Site access can change failover only for ${siteLabel(cloud.site === "all" ? "east" : cloud.site)} services.`);
       return;
     }
     const at = nowLabel();
@@ -273,7 +272,7 @@ export const useDr = create<DrState>((set, get) => ({
     if (!service) return;
     const cloud = useCloud.getState();
     if (!allowed(service)) {
-      cloud.flash("Site access can fail over only Site-East services.");
+      cloud.flash(`Site access can fail over only ${siteLabel(cloud.site === "all" ? "east" : cloud.site)} services.`);
       return;
     }
     if (trigger === "auto" && service.mode !== "auto") {

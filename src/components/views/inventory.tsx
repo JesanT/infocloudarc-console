@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button, Empty, Field, Kpi, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
-import { SITES, inScope, matches, siteLabel, type InventoryItem, type SiteKey } from "@/lib/cloud/model";
+import { inScope, matches, siteLabel, siteOptions, type InventoryItem, type SiteKey } from "@/lib/cloud/model";
 import { parseCsv, templateCsv, type ImportRow } from "@/lib/cloud/fabric";
 import { getAppSubnet, scanSubnet } from "@/lib/cloud/discover";
 import { useCloud } from "@/lib/cloud/store";
@@ -66,6 +66,7 @@ export function InventoryView() {
           : rows;
   const current = inventory.find((item) => item.id === selected) ?? null;
   const canEdit = role !== "site";
+  const choices = siteOptions(role, site);
 
   async function onImport(file: File) {
     const parsed = file.name.toLowerCase().endsWith(".csv") ? parseCsv(await file.text()) : await parseSheet(file);
@@ -167,8 +168,8 @@ export function InventoryView() {
               </Select>
             </Field>
             <Field label="Site">
-              <Select value={form.site} onChange={(e) => setForm({ ...form, site: e.target.value as SiteKey })}>
-                {SITES.map((item) => <option key={item.id} value={item.id}>{siteLabel(item.id)}</option>)}
+              <Select value={choices.includes(form.site) ? form.site : choices[0]} onChange={(e) => setForm({ ...form, site: e.target.value as SiteKey })}>
+                {choices.map((item) => <option key={item} value={item}>{siteLabel(item)}</option>)}
               </Select>
             </Field>
             <Field label="Vendor"><input className={fieldClass} value={form.vendor} onChange={(e) => setForm({ ...form, vendor: e.target.value })} /></Field>
@@ -191,12 +192,13 @@ export function InventoryView() {
           Server subnet {appSubnet || "detecting"} · SNMP v1, v2c, and v3 communities are on Networking / Discovery.
         </p>
         <div className="flex flex-wrap gap-2">
-          {appSubnet && (
+          {canEdit && appSubnet && (
             <Button disabled={busy} onClick={() => void runScan(appSubnet)}>Scan {appSubnet}</Button>
           )}
-          {extraSubnets.map((item) => (
+          {canEdit && extraSubnets.map((item) => (
             <Button key={item} disabled={busy} onClick={() => void runScan(item)}>Scan {item}</Button>
           ))}
+          {!canEdit && <p className="text-sm text-muted">Discovery is limited to global and vendor access.</p>}
         </div>
         {canEdit && (
           <form

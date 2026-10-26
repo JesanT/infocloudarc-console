@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { CatalogTable } from "@/components/catalog-table";
 import { Button, Empty, Field, Kpi, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
 import { hypervAction } from "@/lib/cloud/hyperv";
-import { SITES, inScope, matches, siteLabel, type ComputeCluster, type ComputeService, type Instance, type PhysicalHost, type SiteKey, type WorkloadApp, type WorkloadDatabase } from "@/lib/cloud/model";
+import { boundSite, canMutateSite, inScope, matches, siteLabel, siteOptions, type ComputeCluster, type ComputeService, type Instance, type PhysicalHost, type SiteKey, type WorkloadApp, type WorkloadDatabase } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
 
 type SummaryRow = {
@@ -32,7 +32,10 @@ export function ServicesView() {
   const deleteDb = useCloud((s) => s.deleteWorkloadDatabase);
   const rows = services.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.note, item.site]));
   const visible = new Set(rows.map((item) => item.name));
-  const allow = role !== "site" || site === "east" || site === "all";
+  const choices = siteOptions(role, site);
+  const home = choices[0];
+  const scopedVms = instances.filter((item) => inScope(role, site, item.site));
+  const scopedHosts = hosts.filter((item) => inScope(role, site, item.site));
 
   return (
     <div className="space-y-4">
@@ -41,16 +44,16 @@ export function ServicesView() {
         subtitle="A service depends on an application, a database, or both."
         rows={rows}
         idKey="name"
-        allow={allow}
+        allow
         columns={[
           { key: "name", label: "Name" },
-          { key: "site", label: "Site", options: ["east", "west", "central"] },
+          { key: "site", label: "Site", options: choices },
           { key: "health", label: "Status", options: ["Healthy", "Degraded"] },
           { key: "availability", label: "Availability", numeric: true },
           { key: "performance", label: "Performance", numeric: true },
           { key: "note", label: "Note" },
         ]}
-        blank={() => ({ name: "", site: "east", health: "Healthy", instances: 1, availability: 99.9, performance: 95, note: "" })}
+        blank={() => ({ name: "", site: home, health: "Healthy", instances: 1, availability: 99.9, performance: 95, note: "" })}
         onSave={saveService}
         onDelete={deleteService}
       />
@@ -60,9 +63,9 @@ export function ServicesView() {
         rows={apps.filter((item) => visible.has(item.serviceName))}
         kind="app"
         services={rows}
-        instances={instances}
-        hosts={hosts}
-        allow={allow}
+        instances={scopedVms}
+        hosts={scopedHosts}
+        allow
         onSave={(row) => saveApp(row as WorkloadApp)}
         onDelete={deleteApp}
       />
@@ -72,9 +75,9 @@ export function ServicesView() {
         rows={databases.filter((item) => visible.has(item.serviceName))}
         kind="db"
         services={rows}
-        instances={instances}
-        hosts={hosts}
-        allow={allow}
+        instances={scopedVms}
+        hosts={scopedHosts}
+        allow
         onSave={(row) => saveDb(row as WorkloadDatabase)}
         onDelete={deleteDb}
       />
@@ -95,7 +98,6 @@ export function DatabasesView() {
   const visibleServices = services.filter((item) => inScope(role, site, item.site));
   const names = new Set(visibleServices.map((item) => item.name));
   const rows = databases.filter((item) => names.has(item.serviceName) && matches(query, [item.name, item.engine, item.serviceName]));
-  const allow = role !== "site" || site === "east" || site === "all";
   return (
     <DependencyTable
       title="Databases"
@@ -103,9 +105,9 @@ export function DatabasesView() {
       rows={rows}
       kind="db"
       services={visibleServices}
-      instances={instances}
-      hosts={hosts}
-      allow={allow}
+      instances={instances.filter((item) => inScope(role, site, item.site))}
+      hosts={hosts.filter((item) => inScope(role, site, item.site))}
+      allow
       onSave={(row) => saveDb(row as WorkloadDatabase)}
       onDelete={deleteDb}
     />
@@ -146,9 +148,10 @@ export function ClustersView() {
   const saveHost = useCloud((s) => s.saveHost);
   const deleteHost = useCloud((s) => s.deleteHost);
   const rows = clusters.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.version]));
-  const clusterNames = rows.map((item) => item.name);
-  const hostRows = hosts.filter((item) => inScope(role, site, item.site) && (item.clusterName == null || clusterNames.includes(item.clusterName) || matches(query, [item.name, item.ip])));
-  const allow = role !== "site" || site === "east" || site === "all";
+  const clusterChoices = clusters.filter((item) => inScope(role, site, item.site)).map((item) => item.name);
+  const hostRows = hosts.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.ip, item.clusterName ?? ""]));
+  const choices = siteOptions(role, site);
+  const home = choices[0];
   return (
     <div className="space-y-4">
       <CatalogTable<ComputeCluster>
@@ -156,17 +159,17 @@ export function ClustersView() {
         subtitle="Hyper-V clusters. Physical hosts belong to a cluster."
         rows={rows}
         idKey="name"
-        allow={allow}
+        allow
         columns={[
           { key: "name", label: "Name" },
-          { key: "site", label: "Site", options: ["east", "west", "central"] },
+          { key: "site", label: "Site", options: choices },
           { key: "nodes", label: "Nodes", numeric: true },
           { key: "ha", label: "Status", options: ["Healthy", "Degraded"] },
           { key: "version", label: "Version" },
           { key: "availability", label: "Availability", numeric: true },
           { key: "performance", label: "Performance", numeric: true },
         ]}
-        blank={() => ({ name: "", site: "east", nodes: 1, ha: "Healthy", version: "Hyper-V 2022", availability: 99.9, performance: 90 })}
+        blank={() => ({ name: "", site: home, nodes: 1, ha: "Healthy", version: "Hyper-V 2022", availability: 99.9, performance: 90 })}
         onSave={(row) => saveCluster(row)}
         onDelete={deleteCluster}
       />
@@ -175,18 +178,18 @@ export function ClustersView() {
         subtitle="A host can belong to a cluster. Virtual machines attach to a host."
         rows={hostRows}
         idKey="id"
-        allow={allow}
+        allow
         columns={[
           { key: "id", label: "Id" },
           { key: "name", label: "Name" },
-          { key: "site", label: "Site", options: ["east", "west", "central"] },
-          { key: "clusterName", label: "Cluster", options: ["", ...clusters.map((item) => item.name)] },
+          { key: "site", label: "Site", options: choices },
+          { key: "clusterName", label: "Cluster", options: ["", ...clusterChoices] },
           { key: "status", label: "Status", options: ["Online", "Degraded", "Offline"] },
           { key: "ip", label: "IP" },
           { key: "cpu", label: "CPU", numeric: true },
           { key: "mem", label: "Memory", numeric: true },
         ]}
-        blank={() => ({ id: `ph-${Date.now()}`, name: "", site: "east", clusterName: clusters[0]?.name ?? null, status: "Online", cpu: 10, mem: 20, ip: "" })}
+        blank={() => ({ id: `ph-${Date.now()}`, name: "", site: home, clusterName: clusterChoices[0] ?? null, status: "Online", cpu: 10, mem: 20, ip: "" })}
         onSave={(row) => saveHost({ ...row, clusterName: row.clusterName || null })}
         onDelete={deleteHost}
       />
@@ -334,6 +337,7 @@ export function InstanceOpsView() {
   const [kind, setKind] = useState<Instance["kind"]>("Compute");
   const [os, setOs] = useState("Ubuntu 22.04");
   const rows = instances.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.ip, item.os, item.kind]));
+  const choices = siteOptions(role, site);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("infocloudarc-hv-host") ?? "";
@@ -344,8 +348,9 @@ export function InstanceOpsView() {
   }, [role]);
 
   async function run(action: "stop" | "restart" | "shutdown" | "deploy", vmName: string, vm?: Instance) {
-    if (vm && role === "site" && vm.site !== "east") {
-      flash("Site access cannot change workloads outside Site-East.");
+    if (vm && !canMutateSite(role, site, vm.site)) {
+      const home = boundSite(role, site);
+      flash(`Site access cannot change workloads outside ${siteLabel(home === "all" ? "east" : home)}.`);
       return;
     }
     setBusy(vmName + action);
@@ -402,9 +407,9 @@ export function InstanceOpsView() {
               <input className={fieldClass} value={name} onChange={(event) => setName(event.target.value)} placeholder="app-03" />
             </Field>
             <Field label="Site">
-              <Select value={target} onChange={(event) => setTarget(event.target.value as SiteKey)}>
-                {SITES.map((item) => (
-                  <option key={item.id} value={item.id}>{siteLabel(item.id)}</option>
+              <Select value={choices.includes(target) ? target : choices[0]} onChange={(event) => setTarget(event.target.value as SiteKey)}>
+                {choices.map((item) => (
+                  <option key={item} value={item}>{siteLabel(item)}</option>
                 ))}
               </Select>
             </Field>

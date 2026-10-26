@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Menu, Search, X } from "lucide-react";
-import { ROLE_LABEL, SITES, VIEW_TITLES, siteLabel, type Role, type SiteFilter } from "@/lib/cloud/model";
+import { ROLE_LABEL, SITES, VIEW_TITLES, boundSite, siteLabel, type Role, type SiteFilter, type SiteKey } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
 import { View } from "@/components/views";
 import { SideNav } from "@/components/nav";
@@ -20,6 +20,7 @@ export function AppShell() {
   const setQuery = useCloud((s) => s.setQuery);
   const setNavOpen = useCloud((s) => s.setNavOpen);
   const restored = useConsolePersistence();
+  const viewing = boundSite(role, site);
 
   useEffect(() => {
     const id = window.setInterval(() => useCloud.getState().poll(), 60_000);
@@ -49,7 +50,7 @@ export function AppShell() {
           </button>
         </div>
         <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-6">
-          <SideNav view={view} onSelect={setView} />
+          <SideNav view={view} role={role} onSelect={setView} />
         </nav>
       </aside>
 
@@ -60,7 +61,7 @@ export function AppShell() {
             <Menu className="size-5" />
           </button>
           <div className="min-w-0 flex-1">
-            <div className="text-xs font-medium tracking-wide text-accent uppercase">{siteLabel(role === "site" ? "east" : site)}</div>
+            <div className="text-xs font-medium tracking-wide text-accent uppercase">{siteLabel(viewing)}</div>
             <h1 className="truncate text-lg font-semibold">{VIEW_TITLES[view] ?? "Infocloudarc"}</h1>
           </div>
           <label className="relative order-last w-full sm:order-none sm:w-56">
@@ -74,19 +75,29 @@ export function AppShell() {
           </label>
           <Select
             aria-label="Site"
-            value={role === "site" ? "east" : site}
+            value={viewing}
             disabled={role === "site"}
             onChange={(event) => setSite(event.target.value as SiteFilter)}
           >
-            <option value="all">All sites</option>
-            {SITES.map((item) => (
+            {role !== "site" && <option value="all">All sites</option>}
+            {SITES.filter((item) => role !== "site" || item.id === viewing).map((item) => (
               <option key={item.id} value={item.id}>{siteLabel(item.id)}</option>
             ))}
           </Select>
-          <Select aria-label="Access role" value={role} onChange={(event) => setRole(event.target.value as Role)}>
+          <Select
+            aria-label="Access role"
+            value={role === "site" ? `site:${viewing === "all" ? "east" : viewing}` : role}
+            onChange={(event) => {
+              const value = event.target.value;
+              if (value.startsWith("site:")) setRole("site", value.slice(5) as SiteKey);
+              else setRole(value as Role);
+            }}
+          >
             <option value="vendor">{ROLE_LABEL.vendor}</option>
             <option value="global">{ROLE_LABEL.global}</option>
-            <option value="site">{ROLE_LABEL.site}</option>
+            <option value="site:east">Site admin — East</option>
+            <option value="site:west">Site admin — West</option>
+            <option value="site:central">Site admin — Central</option>
           </Select>
         </header>
         <main className="min-h-0 flex-1 overflow-auto px-4 py-5 md:px-6">

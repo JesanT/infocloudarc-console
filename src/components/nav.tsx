@@ -27,6 +27,7 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
+import type { Role } from "@/lib/cloud/model";
 
 type Leaf = { id: string; label: string; icon?: LucideIcon };
 type Branch = { id: string; label: string; icon?: LucideIcon; items: NavNode[] };
@@ -171,12 +172,20 @@ function ancestors(nodes: NavNode[], target: string, trail: string[] = []): stri
   return null;
 }
 
-export function SideNav({ view, onSelect }: { view: string; onSelect: (id: string) => void }) {
-  const [open, setOpen] = useState<string[]>(() => ancestors(NAV, view) ?? []);
+function forRole(nodes: NavNode[], role: Role): NavNode[] {
+  return nodes.flatMap((node) => {
+    if (!isBranch(node)) return role === "site" && node.id === "mon-global" ? [] : [node];
+    return [{ ...node, items: forRole(node.items, role) }];
+  });
+}
+
+export function SideNav({ view, role, onSelect }: { view: string; role: Role; onSelect: (id: string) => void }) {
+  const items = forRole(NAV, role);
+  const [open, setOpen] = useState<string[]>(() => ancestors(items, view) ?? []);
 
   useEffect(() => {
-    setOpen(ancestors(NAV, view) ?? []);
-  }, [view]);
+    setOpen(ancestors(items, view) ?? []);
+  }, [view, role]);
 
   function toggle(id: string) {
     setOpen((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
@@ -184,7 +193,7 @@ export function SideNav({ view, onSelect }: { view: string; onSelect: (id: strin
 
   return (
     <div className="space-y-1">
-      {NAV.map((node) => (
+      {items.map((node) => (
         <NavBranch key={node.id} node={node} depth={0} open={open} view={view} onToggle={toggle} onSelect={onSelect} />
       ))}
     </div>
