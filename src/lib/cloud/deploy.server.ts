@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { pathOk, type ImageFormat } from "@/lib/cloud/deploy";
 import type { HypervisorKind } from "@/lib/cloud/hypervisor";
 import { runHyperv } from "@/lib/cloud/hyperv.server";
+import { sshInvocation } from "@/lib/cloud/ssh-auth.server";
 
 export type GuestRequest = {
   action: "deploy" | "stop" | "restart" | "shutdown";
@@ -10,6 +11,7 @@ export type GuestRequest = {
   address: string;
   port: number;
   login: string;
+  password: string;
   memoryMb: number;
   vcpu: number;
   diskGb: number;
@@ -34,9 +36,9 @@ function which(bin: string) {
   });
 }
 
-function run(command: string, args: string[], ms = 20000) {
+function run(command: string, args: string[], ms = 20000, env: NodeJS.ProcessEnv = process.env) {
   return new Promise<{ code: number; out: string; err: string }>((resolve) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { env, stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     let err = "";
     const timer = setTimeout(() => child.kill("SIGKILL"), ms);
@@ -71,7 +73,6 @@ async function runLibvirt(input: GuestRequest): Promise<GuestResult> {
     if (file && /\s/.test(file)) return { ok: false, fallback: false, message: "Libvirt paths cannot contain spaces." };
   }
   if (input.switchName && !token(input.switchName)) return { ok: false, fallback: false, message: "The bridge name is not valid." };
-  const target = `${input.login || "root"}@${input.address}`;
   let remote = `virsh -c qemu:///system destroy ${input.name}`;
   if (input.action === "shutdown") remote = `virsh -c qemu:///system shutdown ${input.name}`;
   if (input.action === "restart") remote = `virsh -c qemu:///system reboot ${input.name}`;
@@ -85,10 +86,17 @@ async function runLibvirt(input: GuestRequest): Promise<GuestResult> {
       : `qemu-img create -f ${format} ${disk} ${input.diskGb}G`;
     remote = `${create} && virt-install --name ${input.name} --memory ${input.memoryMb} --vcpus ${input.vcpu} --disk path=${disk},format=${format} --network bridge=${bridge} --import --osinfo detect=on,require=off --noautoconsole`;
   }
-  const result = await run(ssh, ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=8", "-p", String(input.port || 22), target, remote]);
-  const text = `${result.out}\n${result.err}`.trim();
+  const target = `${input.login || "root"}@${input.address}`;
+  const sshCall = await sshInvocation({ ssh, port: input.port || 22, target, remote, password: input.password });
+  let result: { code: number; out: string; err: string };
+  try {
+    result = await run(sshCall.command, sshCall.args, 20000, sshCall.env);
+  } finally {
+    await sshCall.cleanup();
+  }
+  const text = `${result.out}\n${result.err}`.split(input.password || "\u0000").join("••••").trim();
   if (/permission denied|authentication/i.test(text)) {
-    return { ok: false, fallback: false, message: "SSH refused the login. Nothing was created. Put the console key on this hypervisor." };
+    return { ok: false, fallback: false, message: input.password ? "SSH refused the password. Nothing was created. A bad password is not a stopped virtual machine." : "SSH refused the login. Nothing was created. Put the console key on this hypervisor." };
   }
   if (result.code !== 0) {
     const reason = text.split("\n").filter(Boolean).at(-1) || "The hypervisor refused the command.";
@@ -110,6 +118,8 @@ export async function runGuest(input: GuestRequest): Promise<GuestResult> {
     diskPath: input.diskPath,
     imagePath: input.format === "vhdx" ? input.imagePath : "",
     diskGb: input.diskGb,
+    login: input.login,
+    password: input.password,
   });
   return { ok: result.ok, fallback: result.fallback, message: result.message };
 }

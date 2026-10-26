@@ -319,9 +319,9 @@ function collectorRow(row: Collector) {
 function hostRow(row: PhysicalHost) {
   return [row.id, row.name, row.site, row.clusterName || null, row.status, row.cpu, row.mem, row.ip];
 }
-const HYPERVISOR_COLS = ["id", "name", "site", "kind", "address", "port", "transport", "login", "status", "cluster_name", "switch_name", "storage", "host_id", "uri", "detail", "config_repo_id", "disk_repo_id", "swap_repo_id"];
+const HYPERVISOR_COLS = ["id", "name", "site", "kind", "address", "port", "transport", "login", "status", "cluster_name", "switch_name", "storage", "host_id", "uri", "detail", "config_repo_id", "disk_repo_id", "swap_repo_id", "password"];
 function hypervisorRow(row: Hypervisor) {
-  return [row.id, row.name, row.site, row.kind, row.address, row.port, row.transport, row.login, row.status, row.clusterName, row.switchName, row.storage, row.hostId, row.uri, row.detail, row.configRepoId, row.diskRepoId, row.swapRepoId];
+  return [row.id, row.name, row.site, row.kind, row.address, row.port, row.transport, row.login, row.status, row.clusterName, row.switchName, row.storage, row.hostId, row.uri, row.detail, row.configRepoId, row.diskRepoId, row.swapRepoId, row.password || ""];
 }
 const REPO_DEPLOY_COLS = ["id", "name", "site", "kind", "protocol", "address", "path"];
 function deployRepoRow(row: DeployRepository) {
@@ -515,6 +515,7 @@ function hypervisorFrom(row: Record<string, unknown>): Hypervisor {
     port: Number(row.port),
     transport: transport === "ssh" || transport === "tls" || transport === "winrm" ? transport : kind === "libvirt" ? "ssh" : "winrm",
     login: str(row.login),
+    password: str(row.password),
     status: status === "Online" || status === "Degraded" || status === "Offline" ? status : "Unknown",
     clusterName: str(row.cluster_name),
     switchName: str(row.switch_name),

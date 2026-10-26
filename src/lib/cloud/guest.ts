@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { addressOk } from "@/lib/cloud/hypervisor";
+import { addressOk, passwordOk } from "@/lib/cloud/hypervisor";
 import { pathOk, type ImageFormat } from "@/lib/cloud/deploy";
 
 const ACTIONS = ["deploy", "stop", "restart", "shutdown"] as const;
@@ -14,6 +14,7 @@ export const guestAction = createServerFn({ method: "POST" })
     const address = typeof body?.address === "string" ? body.address.trim() : "";
     const port = typeof body?.port === "number" ? body.port : Number(body?.port);
     const login = typeof body?.login === "string" ? body.login.trim() : "";
+    const password = typeof body?.password === "string" ? body.password : "";
     const memoryMb = Number(body?.memoryMb);
     const vcpu = Number(body?.vcpu);
     const diskGb = Number(body?.diskGb);
@@ -28,6 +29,8 @@ export const guestAction = createServerFn({ method: "POST" })
     if (!addressOk(address)) throw new Error("Hypervisor address is not valid.");
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Port is not valid.");
     if (login && !/^[A-Za-z0-9._-]{1,32}$/.test(login)) throw new Error("Login is not valid.");
+    if (!passwordOk(password)) throw new Error("Password is not valid.");
+    if (password && !login) throw new Error("A password needs a login.");
     if (body?.role !== "vendor" && action === "deploy") throw new Error("Only vendor access can deploy instances.");
     for (const file of [configPath, diskPath, imagePath]) {
       if (file && !pathOk(file)) throw new Error("A storage path is not valid.");
@@ -39,6 +42,7 @@ export const guestAction = createServerFn({ method: "POST" })
       address,
       port,
       login,
+      password,
       memoryMb: Number.isInteger(memoryMb) && memoryMb >= 256 && memoryMb <= 1048576 ? memoryMb : 2048,
       vcpu: Number.isInteger(vcpu) && vcpu >= 1 && vcpu <= 128 ? vcpu : 2,
       diskGb: Number.isInteger(diskGb) && diskGb >= 1 && diskGb <= 65536 ? diskGb : 40,

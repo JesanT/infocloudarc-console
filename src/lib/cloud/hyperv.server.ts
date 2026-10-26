@@ -58,19 +58,18 @@ if ($action -eq 'owner') {
 if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) {
   throw 'Hyper-V module is not available on this server.'
 }
+$cred = $null
+if ($env:HV_USER -and $env:HV_PASSWORD) {
+  $sec = ConvertTo-SecureString $env:HV_PASSWORD -AsPlainText -Force
+  $cred = New-Object System.Management.Automation.PSCredential($env:HV_USER, $sec)
+}
+$remote = @{}
+if ($computer) { $remote.ComputerName = $computer }
+if ($computer -and $cred) { $remote.Credential = $cred }
 switch ($action) {
-  'stop' {
-    if ($computer) { Stop-VM -Name $name -ComputerName $computer -TurnOff -Force }
-    else { Stop-VM -Name $name -TurnOff -Force }
-  }
-  'shutdown' {
-    if ($computer) { Stop-VM -Name $name -ComputerName $computer -Force }
-    else { Stop-VM -Name $name -Force }
-  }
-  'restart' {
-    if ($computer) { Restart-VM -Name $name -ComputerName $computer -Force }
-    else { Restart-VM -Name $name -Force }
-  }
+  'stop' { Stop-VM -Name $name @remote -TurnOff -Force }
+  'shutdown' { Stop-VM -Name $name @remote -Force }
+  'restart' { Restart-VM -Name $name @remote -Force }
   'deploy' {
     $bytes = $memory * 1MB
     $switch = [string]$env:HV_SWITCH
@@ -81,26 +80,20 @@ switch ($action) {
     if ($env:HV_DISK_GB) { $diskGb = [int]$env:HV_DISK_GB }
     $vhd = ''
     if ($image -and $disk) {
-      if ($computer) { New-VHD -ComputerName $computer -Path $disk -ParentPath $image -Differencing | Out-Null }
-      else { New-VHD -Path $disk -ParentPath $image -Differencing | Out-Null }
+      New-VHD @remote -Path $disk -ParentPath $image -Differencing | Out-Null
       $vhd = $disk
     } elseif ($disk) {
-      if ($computer) { New-VHD -ComputerName $computer -Path $disk -SizeBytes ($diskGb * 1GB) -Dynamic | Out-Null }
-      else { New-VHD -Path $disk -SizeBytes ($diskGb * 1GB) -Dynamic | Out-Null }
+      New-VHD @remote -Path $disk -SizeBytes ($diskGb * 1GB) -Dynamic | Out-Null
       $vhd = $disk
     } elseif ($image) {
       $vhd = $image
     }
-    if ($computer) {
-      if ($switch -and $vmPath -and $vhd) { New-VM -Name $name -ComputerName $computer -Generation 2 -MemoryStartupBytes $bytes -SwitchName $switch -Path $vmPath -VHDPath $vhd | Start-VM }
-      elseif ($switch -and $vhd) { New-VM -Name $name -ComputerName $computer -Generation 2 -MemoryStartupBytes $bytes -SwitchName $switch -VHDPath $vhd | Start-VM }
-      elseif ($vhd) { New-VM -Name $name -ComputerName $computer -Generation 2 -MemoryStartupBytes $bytes -VHDPath $vhd | Start-VM }
-      else { New-VM -Name $name -ComputerName $computer -Generation 2 -MemoryStartupBytes $bytes | Start-VM }
-    } else {
-      if ($switch -and $vmPath -and $vhd) { New-VM -Name $name -Generation 2 -MemoryStartupBytes $bytes -SwitchName $switch -Path $vmPath -VHDPath $vhd | Start-VM }
-      elseif ($vhd) { New-VM -Name $name -Generation 2 -MemoryStartupBytes $bytes -VHDPath $vhd | Start-VM }
-      else { New-VM -Name $name -Generation 2 -MemoryStartupBytes $bytes | Start-VM }
-    }
+    $vm = @{ Name = $name; Generation = 2; MemoryStartupBytes = $bytes }
+    if ($switch) { $vm.SwitchName = $switch }
+    if ($vmPath) { $vm.Path = $vmPath }
+    if ($vhd) { $vm.VHDPath = $vhd }
+    New-VM @vm @remote | Out-Null
+    Start-VM -Name $name @remote
   }
   default { throw 'Unknown action' }
 }
@@ -133,6 +126,8 @@ export async function runHyperv(input: {
   diskPath?: string;
   imagePath?: string;
   diskGb?: number;
+  login?: string;
+  password?: string;
 }): Promise<HypervResult> {
   const computer = (input.computer ?? "").trim();
   if (computer && !HOST_OK.test(computer)) {
@@ -146,6 +141,8 @@ export async function runHyperv(input: {
     if (!NAME_OK.test(name)) return { ok: false, fallback: false, message: "Instance name is not valid.", ...EMPTY_OWNER };
   }
   const pwsh = await which("pwsh");
+  const secret = input.password ?? "";
+  const hide = (value: string) => (secret ? value.split(secret).join("••••") : value);
   if (!pwsh) {
     return {
       ok: false,
@@ -168,12 +165,14 @@ export async function runHyperv(input: {
       HV_DISK: input.diskPath ?? "",
       HV_IMAGE: input.imagePath ?? "",
       HV_DISK_GB: String(input.diskGb ?? 40),
+      HV_USER: input.login ?? "",
+      HV_PASSWORD: secret,
     }, input.action === "owner" ? 25000 : 20000);
     if (input.action === "owner") return parseOwner(output, input.ip ?? "");
     const target = computer ? ` on ${computer}` : "";
-    return { ok: true, fallback: false, message: output.trim() || `Hyper-V accepted the action${target}.`, ...EMPTY_OWNER };
+    return { ok: true, fallback: false, message: hide(output.trim()) || `Hyper-V accepted the action${target}.`, ...EMPTY_OWNER };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Hyper-V command failed.";
+    const message = hide(error instanceof Error ? error.message : "Hyper-V command failed.");
     if (input.action === "owner") return { ok: false, fallback: false, message, ...EMPTY_OWNER };
     if (!computer) return { ok: false, fallback: true, message, ...EMPTY_OWNER };
     return { ok: false, fallback: false, message, ...EMPTY_OWNER };

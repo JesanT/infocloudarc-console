@@ -741,6 +741,7 @@ export function InstanceOpsView() {
           address: hv.address,
           port: hv.port,
           login: hv.login,
+          password: hv.password || "",
           memoryMb: shape?.memoryMb ?? 2048,
           vcpu: shape?.vcpu ?? 2,
           diskGb: shape?.diskGb ?? 40,

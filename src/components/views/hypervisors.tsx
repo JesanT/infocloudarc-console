@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button, Empty, Field, Kpi, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
 import { checkHypervisor } from "@/lib/cloud/hypervisor-probe";
-import { addressOk, cleanHypervisor, hypervisorDefaults, hypervisorUri, type Hypervisor, type HypervisorKind } from "@/lib/cloud/hypervisor";
+import { addressOk, cleanHypervisor, hypervisorDefaults, hypervisorUri, passwordOk, type Hypervisor, type HypervisorKind } from "@/lib/cloud/hypervisor";
 import { canMutateSite, inScope, matches, siteLabel, siteOptions, type SiteKey } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
 
@@ -16,6 +16,7 @@ function blank(site: SiteKey): Hypervisor {
     port: defaults.port,
     transport: defaults.transport,
     login: "",
+    password: "",
     status: "Unknown",
     clusterName: "",
     switchName: defaults.switchName,
@@ -65,7 +66,7 @@ export function HypervisorsView() {
     setNote("Checking the management port…");
     try {
       const result = await checkHypervisor({
-        data: { kind: row.kind, address: row.address.trim(), port: Number(row.port), transport: row.transport, login: row.login.trim() },
+        data: { kind: row.kind, address: row.address.trim(), port: Number(row.port), transport: row.transport, login: row.login.trim(), password: row.password || "" },
       });
       if (!result.ok) {
         setNote(result.message);
@@ -91,7 +92,7 @@ export function HypervisorsView() {
       </div>
       <Panel
         title="Hypervisors"
-        subtitle="Register the hypervisor itself. Hyper-V is checked on its WinRM port. An Ubuntu host is checked by SSH to virsh on that host. Nothing is installed in a guest. The login is a user name. Passwords and keys are not saved."
+        subtitle="Register the hypervisor itself. Hyper-V is checked on its WinRM port. An Ubuntu host is checked by SSH to virsh on that host. Nothing is installed in a guest. The password is optional."
         action={
           canMutateSite(role, site, home) ? (
             <Button variant="primary" onClick={() => { setDraft(blank(home)); setNote(""); }}>Add</Button>
@@ -117,6 +118,14 @@ export function HypervisorsView() {
               }
               if (next.login && !/^[A-Za-z0-9._-]{1,32}$/.test(next.login)) {
                 flash("Login is not valid.");
+                return;
+              }
+              if (!passwordOk(draft.password || "")) {
+                flash("Password is not valid.");
+                return;
+              }
+              if (next.password && !next.login) {
+                flash("A password needs a login.");
                 return;
               }
               save({ ...next, name: next.name || next.id });
@@ -152,6 +161,9 @@ export function HypervisorsView() {
             </Field>
             <Field label="Login">
               <input className={fieldClass} value={draft.login} autoComplete="off" onChange={(event) => setDraft({ ...draft, login: event.target.value })} placeholder={draft.kind === "libvirt" ? "SSH user on the hypervisor" : "WinRM user, if required"} />
+            </Field>
+            <Field label="Password">
+              <input className={fieldClass} type="password" value={draft.password || ""} autoComplete="new-password" onChange={(event) => setDraft({ ...draft, password: event.target.value })} placeholder="Optional. Blank keeps key or current identity" />
             </Field>
             <Field label="Cluster">
               <input className={fieldClass} value={draft.clusterName} onChange={(event) => setDraft({ ...draft, clusterName: event.target.value })} placeholder="Optional" />
@@ -193,7 +205,7 @@ export function HypervisorsView() {
               <Button variant="primary" type="submit">Save</Button>
               <Button type="button" disabled={busy === (draft.id || "draft")} onClick={() => void runCheck(draft)}>{busy === (draft.id || "draft") ? "Checking…" : "Check"}</Button>
               <Button type="button" onClick={() => setDraft(null)}>Cancel</Button>
-              <p className="text-xs text-muted">{hypervisorUri(draft) || "Add an address to build the connection."} A password is never stored. Machine files, disks, and swap use Deployment repositories. The fallback path is used only when VM storage is empty and the value is a real path.</p>
+              <p className="text-xs text-muted">{hypervisorUri(draft) || "Add an address to build the connection."} The password is saved with this hypervisor and is not shown in the list. Leave it blank to use an SSH key or the console identity.</p>
             </div>
           </form>
         )}

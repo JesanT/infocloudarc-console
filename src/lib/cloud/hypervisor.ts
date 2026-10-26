@@ -13,6 +13,7 @@ export type Hypervisor = {
   port: number;
   transport: HypervisorTransport;
   login: string;
+  password: string;
   status: HypervisorStatus;
   clusterName: string;
   switchName: string;
@@ -35,6 +36,7 @@ export const HYPERVISORS: Hypervisor[] = [
     port: 5985,
     transport: "winrm",
     login: "",
+    password: "",
     status: "Unknown",
     clusterName: "east-compute",
     switchName: "External",
@@ -55,6 +57,7 @@ export const HYPERVISORS: Hypervisor[] = [
     port: 5985,
     transport: "winrm",
     login: "",
+    password: "",
     status: "Unknown",
     clusterName: "west-compute",
     switchName: "External",
@@ -75,6 +78,7 @@ export const HYPERVISORS: Hypervisor[] = [
     port: 5985,
     transport: "winrm",
     login: "",
+    password: "",
     status: "Unknown",
     clusterName: "central-dr",
     switchName: "External",
@@ -87,6 +91,10 @@ export const HYPERVISORS: Hypervisor[] = [
     detail: "Recorded with the compute host. The console has not checked WinRM yet.",
   },
 ];
+
+export function passwordOk(value: string) {
+  return value.length <= 128 && !/[\u0000\r\n]/.test(value);
+}
 
 export function addressOk(value: string) {
   if (value.length < 1 || value.length > 253) return false;
@@ -126,6 +134,7 @@ export function cleanHypervisor(row: Hypervisor): Hypervisor {
     port,
     transport,
     login: row.login.trim(),
+    password: passwordOk(row.password || "") ? row.password || "" : "",
     status,
     clusterName: row.clusterName.trim(),
     switchName: row.switchName.trim(),

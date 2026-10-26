@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import net from "node:net";
 import type { HypervisorKind, HypervisorStatus, HypervisorTransport } from "@/lib/cloud/hypervisor";
+import { sshInvocation } from "@/lib/cloud/ssh-auth.server";
 
 export type HypervisorCheck =
   | { ok: true; status: HypervisorStatus; detail: string }
@@ -74,17 +75,26 @@ function libvirtSummary(text: string) {
   return parts.join(" · ");
 }
 
-async function checkLibvirtSsh(address: string, port: number, login: string): Promise<HypervisorCheck> {
+async function checkLibvirtSsh(address: string, port: number, login: string, password: string): Promise<HypervisorCheck> {
   const ssh = await which("ssh");
   if (!ssh) {
     return { ok: true, status: "Online", detail: "The SSH port accepted a connection. The ssh client is not installed on the console, so virsh was not run." };
   }
   const target = `${login || "root"}@${address}`;
   const remote = "virsh -c qemu:///system version; echo ---; virsh -c qemu:///system nodeinfo; echo ---; virsh -c qemu:///system list --all";
-  const result = await run(ssh, ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=8", "-p", String(port), target, remote], process.env);
-  const text = `${result.out}\n${result.err}`;
+  const sshCall = await sshInvocation({ ssh, port, target, remote, password });
+  let result: { code: number; out: string; err: string };
+  try {
+    result = await run(sshCall.command, sshCall.args, sshCall.env);
+  } finally {
+    await sshCall.cleanup();
+  }
+  const text = `${result.out}\n${result.err}`.split(password || "\u0000").join("••••");
   if (/permission denied|authentication|auth fail/i.test(text)) {
-    return { ok: false, message: "SSH refused the login. Nothing was changed. Put the console key on this hypervisor for that user. A missing key is not downtime." };
+    const why = password
+      ? "SSH refused the password. Nothing was changed. A bad password is not downtime."
+      : "SSH refused the login. Nothing was changed. Put the console key on this hypervisor for that user. A missing key is not downtime.";
+    return { ok: false, message: why };
   }
   if (result.code !== 0 && /not found|No such file/i.test(text)) {
     return { ok: true, status: "Degraded", detail: "SSH connected, but virsh is not installed on the hypervisor." };
@@ -96,21 +106,21 @@ async function checkLibvirtSsh(address: string, port: number, login: string): Pr
   return { ok: true, status: "Online", detail: summary || "Libvirt answered on the hypervisor." };
 }
 
-async function checkWinrm(address: string, port: number): Promise<HypervisorCheck> {
+async function checkWinrm(address: string, port: number, login: string, password: string): Promise<HypervisorCheck> {
   const pwsh = await which("pwsh");
   if (!pwsh) {
     return { ok: true, status: "Online", detail: "The WinRM port accepted a connection. PowerShell is not installed on the console, so the host was not asked further." };
   }
   const result = await run(
     pwsh,
-    ["-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference='Stop'; if ($env:HV_PORT -eq '5986') { Test-WSMan -ComputerName $env:HV_HOST -Port 5986 -UseSSL | Out-String } else { Test-WSMan -ComputerName $env:HV_HOST -Port ([int]$env:HV_PORT) | Out-String }"],
-    { ...process.env, HV_HOST: address, HV_PORT: String(port) },
+    ["-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference='Stop'; $extra=@{}; if ($env:HV_USER -and $env:HV_PASSWORD) { $sec = ConvertTo-SecureString $env:HV_PASSWORD -AsPlainText -Force; $extra.Credential = New-Object System.Management.Automation.PSCredential($env:HV_USER, $sec) }; if ($env:HV_PORT -eq '5986') { Test-WSMan -ComputerName $env:HV_HOST -Port 5986 -UseSSL @extra | Out-String } else { Test-WSMan -ComputerName $env:HV_HOST -Port ([int]$env:HV_PORT) @extra | Out-String }"],
+    { ...process.env, HV_HOST: address, HV_PORT: String(port), HV_USER: login, HV_PASSWORD: password },
   );
   if (result.code !== 0) {
-    const reason = (result.err || result.out).trim().split("\n").at(-1) || "Test-WSMan failed";
+    const reason = (result.err || result.out).split(password || "\u0000").join("••••").trim().split("\n").at(-1) || "Test-WSMan failed";
     return { ok: true, status: "Degraded", detail: `The WinRM port is open, but the host did not answer Test-WSMan. ${reason}`.slice(0, 400) };
   }
-  return { ok: true, status: "Online", detail: "WinRM answered Test-WSMan." };
+  return { ok: true, status: "Online", detail: password ? "WinRM answered Test-WSMan with the saved login." : "WinRM answered Test-WSMan." };
 }
 
 export async function checkHypervisorHost(input: {
@@ -119,6 +129,7 @@ export async function checkHypervisorHost(input: {
   port: number;
   transport: HypervisorTransport;
   login: string;
+  password: string;
 }): Promise<HypervisorCheck> {
   const tcp = await probeTcp(input.address, input.port);
   if (tcp === "refused") {
@@ -130,10 +141,10 @@ export async function checkHypervisorHost(input: {
   if (tcp === "unreachable") {
     return { ok: false, message: "The address could not be reached. Nothing was changed." };
   }
-  if (input.kind === "libvirt" && input.transport === "ssh") return checkLibvirtSsh(input.address, input.port, input.login);
+  if (input.kind === "libvirt" && input.transport === "ssh") return checkLibvirtSsh(input.address, input.port, input.login, input.password);
   if (input.kind === "libvirt" && input.transport === "tls") {
     return { ok: true, status: "Online", detail: "The TLS port accepted a connection. The console does not present a client certificate, so libvirt was not queried." };
   }
-  if (input.kind === "hyper-v") return checkWinrm(input.address, input.port);
+  if (input.kind === "hyper-v") return checkWinrm(input.address, input.port, input.login, input.password);
   return { ok: true, status: "Online", detail: "The management port accepted a connection." };
 }
