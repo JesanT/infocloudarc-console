@@ -5,6 +5,7 @@ import { useCloud } from "@/lib/cloud/store";
 import { View } from "@/components/views";
 import { SideNav } from "@/components/nav";
 import { Select } from "@/components/ui";
+import { useConsolePersistence } from "@/lib/cloud/persist";
 
 export function AppShell() {
   const view = useCloud((s) => s.view);
@@ -18,6 +19,7 @@ export function AppShell() {
   const setSite = useCloud((s) => s.setSite);
   const setQuery = useCloud((s) => s.setQuery);
   const setNavOpen = useCloud((s) => s.setNavOpen);
+  const restored = useConsolePersistence();
 
   useEffect(() => {
     const id = window.setInterval(() => useCloud.getState().poll(), 60_000);
@@ -88,9 +90,13 @@ export function AppShell() {
           </Select>
         </header>
         <main className="min-h-0 flex-1 overflow-auto px-4 py-5 md:px-6">
-          <div key={view} className="enter mx-auto max-w-6xl">
-            <View id={view} />
-          </div>
+          {restored ? (
+            <div key={view} className="enter mx-auto max-w-6xl">
+              <View id={view} />
+            </div>
+          ) : (
+            <p className="text-sm text-muted">Restoring the saved console…</p>
+          )}
         </main>
       </div>
 

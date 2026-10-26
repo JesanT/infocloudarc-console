@@ -32,4 +32,4 @@ npm run build
 npx vite preview --host 0.0.0.0 --port 8080
 ```
 
-Open `http://<server>:8080/`. The production build is a web bundle. Inventory, network polls, and Service DR failover currently live in the browser session; they reset on refresh. Connecting that state to a database is the next production step.
+Open `http://<server>:8080/`. Inventory, network polls, and Service DR are saved on the server in `data/pglite` and come back after a refresh or a process restart. Set `DATABASE_URL` to use Postgres instead of that local database. Sign-in is still the role switcher; real operator accounts are next.
