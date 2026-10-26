@@ -36,6 +36,7 @@ export function Dashboard() {
   const alerts = useCloud((s) => s.alerts);
   const instances = useCloud((s) => s.instances).filter((item) => inScope(role, site, item.site));
   const inventory = useCloud((s) => s.inventory).filter((item) => inScope(role, site, item.site));
+  const hypervisors = useCloud((s) => s.hypervisors).filter((item) => inScope(role, site, item.site));
   const repositories = useCloud((s) => s.repositories).filter((item) => inScope(role, site, item.site));
   const subscriptions = useCloud((s) => s.subscriptions).filter((item) => inScope(role, site, item.site));
   const ports = useCloud((s) => s.ports).filter((port) => inventory.some((item) => item.id === port.assetId));
@@ -143,6 +144,7 @@ export function Dashboard() {
     {
       title: "Administration",
       rows: [
+        ["hypervisors", "Hypervisors", `${hypervisors.length} registered, ${hypervisors.filter((item) => item.kind === "libvirt").length} libvirt`, hypervisors.some((item) => item.status === "Offline") ? "Warning" : "Healthy"],
         ["inventory", "Inventory", `${inventory.length} assets, ${offline} offline`, offline ? "Critical" : degradedAssets ? "Warning" : "Healthy"],
         ["repository", "Repository", `${repositories.length} catalogs`, repoWatch ? "Warning" : "Healthy"],
         ["subscriptions", "Subscriptions", `${licenseWatch.length} need review`, licenseWatch.length ? "Warning" : "Healthy"],

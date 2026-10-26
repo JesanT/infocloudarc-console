@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { HYPERVISORS, cleanHypervisor, type Hypervisor } from "@/lib/cloud/hypervisor";
 import { refreshServices, type WorkloadSample } from "@/lib/cloud/uptime";
 import {
   ARRAYS,
@@ -110,6 +111,7 @@ type CloudState = {
   policies: BackupPolicy[];
   collectors: Collector[];
   hosts: PhysicalHost[];
+  hypervisors: Hypervisor[];
   workloadApps: WorkloadApp[];
   workloadDatabases: WorkloadDatabase[];
   workloadSamples: WorkloadSample[];
@@ -149,6 +151,8 @@ type CloudState = {
   deleteCluster: (name: string) => void;
   saveHost: (row: PhysicalHost) => void;
   deleteHost: (id: string) => void;
+  saveHypervisor: (row: Hypervisor) => void;
+  deleteHypervisor: (id: string) => void;
   saveSwitch: (row: SanSwitch) => void;
   deleteSwitch: (name: string) => void;
   saveArray: (row: StorageArray) => void;
@@ -199,6 +203,7 @@ export const useCloud = create<CloudState>((set, get) => ({
   policies: POLICIES,
   collectors: COLLECTORS,
   hosts: PHYSICAL_HOSTS,
+  hypervisors: HYPERVISORS,
   workloadApps: WORKLOAD_APPS,
   workloadDatabases: WORKLOAD_DATABASES,
   workloadSamples: [],
@@ -574,6 +579,18 @@ export const useCloud = create<CloudState>((set, get) => ({
     });
     get().flash(`Deleted host ${row.name}.`);
     get().captureWorkloads();
+  },
+  saveHypervisor: (row) => {
+    const next = cleanHypervisor(row);
+    if (!allowSite(get, next.site)) return;
+    set({ hypervisors: upsert(get().hypervisors, next, "id") });
+    get().flash(`Saved hypervisor ${next.name}.`);
+  },
+  deleteHypervisor: (id) => {
+    const row = get().hypervisors.find((item) => item.id === id);
+    if (!row || !allowSite(get, row.site)) return;
+    set({ hypervisors: get().hypervisors.filter((item) => item.id !== id) });
+    get().flash(`Deleted hypervisor ${row.name}.`);
   },
   saveSwitch: (row) => {
     if (!allowSite(get, row.site)) return;

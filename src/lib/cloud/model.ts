@@ -545,6 +545,7 @@ export const VIEW_TITLES: Record<string, string> = {
   "iam-users": "Users and access",
   licensing: "Licensing",
   inventory: "Inventory",
+  hypervisors: "Hypervisors",
   repository: "Repository",
   subscriptions: "Subscriptions",
   reports: "Reports",

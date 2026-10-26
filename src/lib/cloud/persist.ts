@@ -27,6 +27,7 @@ const CLOUD_KEYS = [
   "policies",
   "collectors",
   "hosts",
+  "hypervisors",
   "workloadApps",
   "workloadDatabases",
   "workloadSamples",

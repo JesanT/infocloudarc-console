@@ -26,6 +26,7 @@ import type {
 } from "@/lib/cloud/model";
 import type { DrAlertRow, DrApp, DrAudit, DrCluster, DrDatabase, DrHost, DrPerf, DrService, DrSignal, DrVm, DrWorkflow } from "@/lib/cloud/dr";
 import type { WorkloadSample } from "@/lib/cloud/uptime";
+import type { Hypervisor } from "@/lib/cloud/hypervisor";
 
 export type ConsolePayload = {
   v: 1;
@@ -56,6 +57,7 @@ type CloudSnap = {
   policies?: BackupPolicy[];
   collectors?: Collector[];
   hosts?: PhysicalHost[];
+  hypervisors?: Hypervisor[];
   workloadApps?: WorkloadApp[];
   workloadDatabases?: WorkloadDatabase[];
   workloadSamples?: WorkloadSample[];
@@ -113,6 +115,7 @@ export async function writeConsole(payload: ConsolePayload): Promise<void> {
     await replaceRows(sql, "compute_clusters", CLUSTER_COLS, (cloud.clusters ?? []).map(clusterRow));
     await replaceRows(sql, "compute_services", SERVICE_COLS, (cloud.services ?? []).map(serviceRow));
     await replaceRows(sql, "physical_hosts", HOST_COLS, (cloud.hosts ?? []).map(hostRow));
+    await replaceRows(sql, "hypervisors", HYPERVISOR_COLS, (cloud.hypervisors ?? []).map(hypervisorRow));
     await replaceRows(sql, "instances", INSTANCE_COLS, (cloud.instances ?? []).map(instanceRow));
     await replaceRows(sql, "workload_apps", WORKLOAD_APP_COLS, (cloud.workloadApps ?? []).map(workloadAppRow));
     await replaceRows(sql, "workload_databases", WORKLOAD_DB_COLS, (cloud.workloadDatabases ?? []).map(workloadDbRow));
@@ -188,6 +191,7 @@ async function assemble(): Promise<ConsolePayload> {
       policies: (await sql<Record<string, unknown>>`select * from backup_policies order by name`).map(policyFrom),
       collectors: (await sql<Record<string, unknown>>`select * from monitor_collectors order by name`).map(collectorFrom),
       hosts: (await sql<Record<string, unknown>>`select * from physical_hosts order by name`).map(hostFrom),
+      hypervisors: (await sql<Record<string, unknown>>`select * from hypervisors order by name`).map(hypervisorFrom),
       workloadApps: (await sql<Record<string, unknown>>`select * from workload_apps order by name`).map(workloadAppFrom),
       workloadDatabases: (await sql<Record<string, unknown>>`select * from workload_databases order by name`).map(workloadDbFrom),
       workloadSamples: (await sql<Record<string, unknown>>`select * from workload_samples order by hour`).map(sampleFrom),
@@ -302,6 +306,10 @@ function collectorRow(row: Collector) {
 }
 function hostRow(row: PhysicalHost) {
   return [row.id, row.name, row.site, row.clusterName || null, row.status, row.cpu, row.mem, row.ip];
+}
+const HYPERVISOR_COLS = ["id", "name", "site", "kind", "address", "port", "transport", "login", "status", "cluster_name", "switch_name", "storage", "host_id", "uri", "detail"];
+function hypervisorRow(row: Hypervisor) {
+  return [row.id, row.name, row.site, row.kind, row.address, row.port, row.transport, row.login, row.status, row.clusterName, row.switchName, row.storage, row.hostId, row.uri, row.detail];
 }
 function workloadAppRow(row: WorkloadApp) {
   return [row.id, row.name, row.kind, row.serviceName, row.vmId || null, row.hostId || null, row.port, row.status];
@@ -463,6 +471,28 @@ function collectorFrom(row: Record<string, unknown>): Collector {
 }
 function hostFrom(row: Record<string, unknown>): PhysicalHost {
   return { id: str(row.id), name: str(row.name), site: str(row.site) as PhysicalHost["site"], clusterName: row.cluster_name == null ? null : str(row.cluster_name), status: str(row.status) as PhysicalHost["status"], cpu: Number(row.cpu), mem: Number(row.mem), ip: str(row.ip) };
+}
+function hypervisorFrom(row: Record<string, unknown>): Hypervisor {
+  const kind = str(row.kind) === "libvirt" ? "libvirt" : "hyper-v";
+  const transport = str(row.transport);
+  const status = str(row.status);
+  return {
+    id: str(row.id),
+    name: str(row.name),
+    site: str(row.site) as Hypervisor["site"],
+    kind,
+    address: str(row.address),
+    port: Number(row.port),
+    transport: transport === "ssh" || transport === "tls" || transport === "winrm" ? transport : kind === "libvirt" ? "ssh" : "winrm",
+    login: str(row.login),
+    status: status === "Online" || status === "Degraded" || status === "Offline" ? status : "Unknown",
+    clusterName: str(row.cluster_name),
+    switchName: str(row.switch_name),
+    storage: str(row.storage),
+    hostId: str(row.host_id),
+    uri: str(row.uri),
+    detail: str(row.detail),
+  };
 }
 function workloadAppFrom(row: Record<string, unknown>): WorkloadApp {
   return { id: str(row.id), name: str(row.name), kind: str(row.kind), serviceName: str(row.service_name), vmId: row.vm_id == null ? null : str(row.vm_id), hostId: row.host_id == null ? null : str(row.host_id), port: Number(row.port), status: str(row.status) as WorkloadApp["status"] };
