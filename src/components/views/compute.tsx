@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button, Empty, Field, Kpi, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
 import { hypervAction } from "@/lib/cloud/hyperv";
-import { CLUSTERS, SERVICES, SITES, inScope, matches, siteLabel, type Instance, type SiteKey } from "@/lib/cloud/model";
+import { SITES, inScope, matches, siteLabel, type Instance, type SiteKey } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
 
 type SummaryRow = {
@@ -18,7 +18,8 @@ export function ServicesView() {
   const role = useCloud((s) => s.role);
   const site = useCloud((s) => s.site);
   const query = useCloud((s) => s.query);
-  const rows = SERVICES.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.note, item.site])).map((item) => ({
+  const services = useCloud((s) => s.services);
+  const rows = services.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.note, item.site])).map((item) => ({
     id: item.name,
     name: item.name,
     site: siteLabel(item.site),
@@ -61,7 +62,8 @@ export function ClustersView() {
   const role = useCloud((s) => s.role);
   const site = useCloud((s) => s.site);
   const query = useCloud((s) => s.query);
-  const rows = CLUSTERS.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.version])).map((item) => ({
+  const clusters = useCloud((s) => s.clusters);
+  const rows = clusters.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.version])).map((item) => ({
     id: item.name,
     name: item.name,
     site: siteLabel(item.site),

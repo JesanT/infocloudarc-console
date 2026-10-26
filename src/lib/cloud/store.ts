@@ -1,22 +1,44 @@
 import { create } from "zustand";
 import {
+  ARRAYS,
+  BACKUPS,
+  BACKUP_TARGETS,
+  CLUSTERS,
+  COLLECTORS,
   INVENTORY,
   INSTANCES,
+  POLICIES,
+  REPORTS,
   REPOS,
+  RESTORE_POINTS,
   SEED_ACTIVITY,
+  SERVICES,
   SUBSCRIPTIONS,
+  SWITCHES,
+  USERS,
   completeAsset,
   type Activity,
+  type BackupJob,
+  type BackupPolicy,
+  type BackupTarget,
+  type Collector,
+  type ComputeCluster,
+  type ComputeService,
   type ContentRepo,
   type Instance,
   type InventoryItem,
   type NetAlert,
   type NetEvent,
   type NetPort,
+  type Operator,
+  type ReportDef,
+  type RestorePoint,
   type Role,
+  type SanSwitch,
   type SiteFilter,
   type SiteKey,
   type SnmpConfig,
+  type StorageArray,
   type Subscription,
 } from "@/lib/cloud/model";
 import {
@@ -66,6 +88,17 @@ type CloudState = {
   ports: NetPort[];
   alerts: NetAlert[];
   events: NetEvent[];
+  services: ComputeService[];
+  clusters: ComputeCluster[];
+  backups: BackupJob[];
+  reports: ReportDef[];
+  switches: SanSwitch[];
+  arrays: StorageArray[];
+  operators: Operator[];
+  backupTargets: BackupTarget[];
+  restorePoints: RestorePoint[];
+  policies: BackupPolicy[];
+  collectors: Collector[];
   snmp: SnmpConfig;
   appSubnet: string;
   appAddress: string;
@@ -114,6 +147,17 @@ export const useCloud = create<CloudState>((set, get) => ({
   ports: seedPorts,
   alerts: [],
   events: [],
+  services: SERVICES,
+  clusters: CLUSTERS,
+  backups: BACKUPS,
+  reports: REPORTS,
+  switches: SWITCHES,
+  arrays: ARRAYS,
+  operators: USERS,
+  backupTargets: BACKUP_TARGETS,
+  restorePoints: RESTORE_POINTS,
+  policies: POLICIES,
+  collectors: COLLECTORS,
   snmp: DEFAULT_SNMP,
   appSubnet: "",
   appAddress: "",

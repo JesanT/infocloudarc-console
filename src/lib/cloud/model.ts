@@ -255,6 +255,94 @@ export const SUBSCRIPTIONS: Subscription[] = [
   { id: "sub-8", module: "Audit and Reporting", scope: "Global", site: "global", plan: "Global view", seats: "Included", status: "Active", renews: "01 Jun 2027", annual: "$9,200" },
 ];
 
+export type ComputeService = {
+  name: string;
+  site: SiteKey;
+  health: "Healthy" | "Degraded";
+  instances: number;
+  availability: number;
+  performance: number;
+  note: string;
+};
+
+export type ComputeCluster = {
+  name: string;
+  site: SiteKey;
+  nodes: number;
+  ha: "Healthy" | "Degraded";
+  version: string;
+  availability: number;
+  performance: number;
+};
+
+export type BackupJob = {
+  id: string;
+  job: string;
+  type: string;
+  status: "Success" | "Warning" | "Failed";
+  last: string;
+  size: string;
+  site: SiteKey;
+};
+
+export type SanSwitch = {
+  name: string;
+  site: SiteKey;
+  vendor: string;
+  ports: number;
+  status: "Online" | "Degraded" | "Offline";
+  note: string;
+};
+
+export type StorageArray = {
+  name: string;
+  site: SiteKey;
+  kind: string;
+  usable: string;
+  used: number;
+  status: "Online" | "Degraded" | "Offline";
+};
+
+export type Operator = {
+  name: string;
+  role: string;
+  sites: string;
+  auth: string;
+  status: "Active" | "Disabled";
+};
+
+export type BackupTarget = {
+  id: string;
+  name: string;
+  site: SiteKey;
+  free: string;
+  status: "Online" | "Warning";
+};
+
+export type RestorePoint = {
+  id: string;
+  workload: string;
+  points: number;
+  latest: string;
+  site: SiteKey;
+};
+
+export type BackupPolicy = {
+  id: string;
+  name: string;
+  retention: string;
+  copy: string;
+  scope: string;
+};
+
+export type Collector = {
+  id: string;
+  name: string;
+  scope: string;
+  interval: string;
+  status: "Active" | "Warning";
+};
+
 export const REPORTS: ReportDef[] = [
   { id: "rpt-inventory", name: "Asset inventory", cadence: "Weekly", audience: "Site and global", description: "Hardware and software assets by site, owner, and status." },
   { id: "rpt-capacity", name: "Capacity and utilization", cadence: "Daily", audience: "Global", description: "Compute, storage, and repository headroom across sites." },
@@ -263,43 +351,67 @@ export const REPORTS: ReportDef[] = [
   { id: "rpt-audit", name: "Audit activity", cadence: "On demand", audience: "Global", description: "Operator actions: power, deploy, sync, and renewals." },
 ];
 
-export const BACKUPS = [
-  { job: "Daily-VM-Backup", type: "Full", status: "Success" as const, last: "2 h ago", size: "1.2 TB", site: "east" as SiteKey },
-  { job: "DB-Incremental", type: "Incremental", status: "Warning" as const, last: "45 min ago", size: "340 GB", site: "east" as SiteKey },
-  { job: "File-Share-Weekly", type: "Full", status: "Success" as const, last: "1 d ago", size: "890 GB", site: "west" as SiteKey },
-  { job: "DR-Replication", type: "Continuous", status: "Warning" as const, last: "10 min ago", size: "2.1 TB", site: "central" as SiteKey },
+export const BACKUPS: BackupJob[] = [
+  { id: "daily-vm", job: "Daily-VM-Backup", type: "Full", status: "Success", last: "2 h ago", size: "1.2 TB", site: "east" },
+  { id: "db-incremental", job: "DB-Incremental", type: "Incremental", status: "Warning", last: "45 min ago", size: "340 GB", site: "east" },
+  { id: "file-share", job: "File-Share-Weekly", type: "Full", status: "Success", last: "1 d ago", size: "890 GB", site: "west" },
+  { id: "dr-replication", job: "DR-Replication", type: "Continuous", status: "Warning", last: "10 min ago", size: "2.1 TB", site: "central" },
 ];
 
-export const SERVICES = [
+export const SERVICES: ComputeService[] = [
   { name: "edge-gateway", site: "east" as SiteKey, health: "Healthy" as const, instances: 2, availability: 99.98, performance: 97, note: "Public ingress" },
   { name: "app-api", site: "east" as SiteKey, health: "Healthy" as const, instances: 4, availability: 99.95, performance: 93, note: "Stateless API" },
   { name: "identity", site: "central" as SiteKey, health: "Healthy" as const, instances: 2, availability: 99.99, performance: 96, note: "Local + AD" },
   { name: "metrics", site: "west" as SiteKey, health: "Degraded" as const, instances: 1, availability: 98.4, performance: 71, note: "Scrape lag" },
 ];
 
-export const CLUSTERS = [
+export const CLUSTERS: ComputeCluster[] = [
   { name: "east-compute", site: "east" as SiteKey, nodes: 12, ha: "Healthy" as const, version: "Hyper-V 2022", availability: 99.99, performance: 94 },
   { name: "west-compute", site: "west" as SiteKey, nodes: 8, ha: "Healthy" as const, version: "Hyper-V 2022", availability: 99.95, performance: 92 },
   { name: "central-dr", site: "central" as SiteKey, nodes: 6, ha: "Degraded" as const, version: "Hyper-V 2019", availability: 98.1, performance: 74 },
 ];
 
-export const SWITCHES = [
+export const SWITCHES: SanSwitch[] = [
   { name: "SAN-SW-East-01", site: "east" as SiteKey, vendor: "Brocade", ports: 64, status: "Online" as const, note: "All ports healthy" },
   { name: "SAN-SW-West-01", site: "west" as SiteKey, vendor: "Cisco MDS", ports: 48, status: "Degraded" as const, note: "2 ports flapping" },
   { name: "SAN-SW-Central-01", site: "central" as SiteKey, vendor: "Brocade", ports: 48, status: "Online" as const, note: "Healthy" },
 ];
 
-export const ARRAYS = [
+export const ARRAYS: StorageArray[] = [
   { name: "Array-A", site: "east" as SiteKey, kind: "All-flash", usable: "120 TB", used: 68, status: "Online" as const },
   { name: "Array-B", site: "west" as SiteKey, kind: "Hybrid", usable: "240 TB", used: 45, status: "Online" as const },
   { name: "Array-C", site: "central" as SiteKey, kind: "All-flash", usable: "80 TB", used: 81, status: "Degraded" as const },
 ];
 
-export const USERS = [
+export const USERS: Operator[] = [
   { name: "vendor.admin", role: "Vendor", sites: "All", auth: "Local", status: "Active" as const },
   { name: "global.ops", role: "Global", sites: "All", auth: "Active Directory", status: "Active" as const },
   { name: "site.east.eng", role: "Site", sites: "Site-East", auth: "Local", status: "Active" as const },
   { name: "site.west.ops", role: "Site", sites: "Site-West", auth: "Active Directory", status: "Active" as const },
+];
+
+export const BACKUP_TARGETS: BackupTarget[] = [
+  { id: "repo-east-perf", name: "repo-east-perf", site: "east", free: "18 TB free", status: "Online" },
+  { id: "repo-west-cap", name: "repo-west-cap", site: "west", free: "42 TB free", status: "Online" },
+  { id: "repo-central-dr", name: "repo-central-dr", site: "central", free: "6 TB free", status: "Warning" },
+];
+
+export const RESTORE_POINTS: RestorePoint[] = [
+  { id: "rp-web", workload: "web-prod-01", points: 14, latest: "2 h ago", site: "east" },
+  { id: "rp-db", workload: "db-primary", points: 48, latest: "45 min ago", site: "east" },
+  { id: "rp-file", workload: "file-share", points: 8, latest: "1 d ago", site: "west" },
+];
+
+export const POLICIES: BackupPolicy[] = [
+  { id: "pol-gold", name: "Gold-VM", retention: "30 daily / 12 monthly", copy: "Central DR", scope: "All sites" },
+  { id: "pol-db", name: "Database", retention: "14 daily + logs", copy: "West replica", scope: "East, West" },
+  { id: "pol-file", name: "File", retention: "8 weekly", copy: "None", scope: "West" },
+];
+
+export const COLLECTORS: Collector[] = [
+  { id: "col-node", name: "node-exporter", scope: "All compute", interval: "15s", status: "Active" },
+  { id: "col-snmp", name: "snmp-fabric", scope: "Network + SAN", interval: "30s", status: "Active" },
+  { id: "col-backup", name: "backup-jobs", scope: "Backup servers", interval: "60s", status: "Active" },
 ];
 
 export const SEED_ACTIVITY: Activity[] = [

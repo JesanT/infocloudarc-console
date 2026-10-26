@@ -1,13 +1,24 @@
 import { getSql, withTransaction, type Sql } from "@/lib/db";
 import type {
   Activity,
+  BackupJob,
+  BackupPolicy,
+  BackupTarget,
+  Collector,
+  ComputeCluster,
+  ComputeService,
   ContentRepo,
   Instance,
   InventoryItem,
   NetAlert,
   NetEvent,
   NetPort,
+  Operator,
+  ReportDef,
+  RestorePoint,
+  SanSwitch,
   SnmpConfig,
+  StorageArray,
   Subscription,
 } from "@/lib/cloud/model";
 import type { DrAlertRow, DrApp, DrAudit, DrCluster, DrDatabase, DrHost, DrPerf, DrService, DrSignal, DrVm, DrWorkflow } from "@/lib/cloud/dr";
@@ -29,6 +40,17 @@ type CloudSnap = {
   ports?: NetPort[];
   alerts?: NetAlert[];
   events?: NetEvent[];
+  services?: ComputeService[];
+  clusters?: ComputeCluster[];
+  backups?: BackupJob[];
+  reports?: ReportDef[];
+  switches?: SanSwitch[];
+  arrays?: StorageArray[];
+  operators?: Operator[];
+  backupTargets?: BackupTarget[];
+  restorePoints?: RestorePoint[];
+  policies?: BackupPolicy[];
+  collectors?: Collector[];
   snmp?: SnmpConfig;
   appSubnet?: string;
   appAddress?: string;
@@ -77,6 +99,17 @@ export async function writeConsole(payload: ConsolePayload): Promise<void> {
     await replaceRows(sql, "content_repositories", REPO_COLS, (cloud.repositories ?? []).map(repoRow));
     await replaceRows(sql, "subscriptions", SUB_COLS, (cloud.subscriptions ?? []).map(subRow));
     await replaceRows(sql, "activity_log", ACTIVITY_COLS, (cloud.activity ?? []).map(activityRow));
+    await replaceRows(sql, "compute_services", SERVICE_COLS, (cloud.services ?? []).map(serviceRow));
+    await replaceRows(sql, "compute_clusters", CLUSTER_COLS, (cloud.clusters ?? []).map(clusterRow));
+    await replaceRows(sql, "backup_jobs", BACKUP_COLS, (cloud.backups ?? []).map(backupRow));
+    await replaceRows(sql, "report_defs", REPORT_COLS, (cloud.reports ?? []).map(reportRow));
+    await replaceRows(sql, "san_switches", SWITCH_COLS, (cloud.switches ?? []).map(switchRow));
+    await replaceRows(sql, "storage_arrays", ARRAY_COLS, (cloud.arrays ?? []).map(arrayRow));
+    await replaceRows(sql, "operators", OPERATOR_COLS, (cloud.operators ?? []).map(operatorRow));
+    await replaceRows(sql, "backup_targets", TARGET_COLS, (cloud.backupTargets ?? []).map(targetRow));
+    await replaceRows(sql, "restore_points", RESTORE_COLS, (cloud.restorePoints ?? []).map(restoreRow));
+    await replaceRows(sql, "backup_policies", POLICY_COLS, (cloud.policies ?? []).map(policyRow));
+    await replaceRows(sql, "monitor_collectors", COLLECTOR_COLS, (cloud.collectors ?? []).map(collectorRow));
     await replaceRows(sql, "dr_apps", [], []);
     await replaceRows(sql, "dr_databases", [], []);
     await replaceRows(sql, "dr_workflows", [], []);
@@ -127,6 +160,17 @@ async function assemble(): Promise<ConsolePayload> {
       repositories: (await sql<Record<string, unknown>>`select * from content_repositories order by name`).map(repoFrom),
       subscriptions: (await sql<Record<string, unknown>>`select * from subscriptions order by module`).map(subFrom),
       activity: (await sql<Record<string, unknown>>`select * from activity_log`).map(activityFrom),
+      services: (await sql<Record<string, unknown>>`select * from compute_services order by name`).map(serviceFrom),
+      clusters: (await sql<Record<string, unknown>>`select * from compute_clusters order by name`).map(clusterFrom),
+      backups: (await sql<Record<string, unknown>>`select * from backup_jobs order by job`).map(backupFrom),
+      reports: (await sql<Record<string, unknown>>`select * from report_defs order by name`).map(reportFrom),
+      switches: (await sql<Record<string, unknown>>`select * from san_switches order by name`).map(switchFrom),
+      arrays: (await sql<Record<string, unknown>>`select * from storage_arrays order by name`).map(arrayFrom),
+      operators: (await sql<Record<string, unknown>>`select * from operators order by name`).map(operatorFrom),
+      backupTargets: (await sql<Record<string, unknown>>`select * from backup_targets order by name`).map(targetFrom),
+      restorePoints: (await sql<Record<string, unknown>>`select * from restore_points order by workload`).map(restoreFrom),
+      policies: (await sql<Record<string, unknown>>`select * from backup_policies order by name`).map(policyFrom),
+      collectors: (await sql<Record<string, unknown>>`select * from monitor_collectors order by name`).map(collectorFrom),
     },
     dr: {
       services: (await sql<Record<string, unknown>>`select * from dr_services order by name`).map(drServiceFrom),
@@ -152,6 +196,17 @@ const EVENT_COLS = ["id", "asset_id", "message", "at"];
 const REPO_COLS = ["id", "name", "kind", "site", "capacity_tb", "used_pct", "status", "last_sync", "objects"];
 const SUB_COLS = ["id", "module", "scope", "site", "plan", "seats", "status", "renews", "annual"];
 const ACTIVITY_COLS = ["id", "text", "at"];
+const SERVICE_COLS = ["name", "site", "health", "instances", "availability", "performance", "note"];
+const CLUSTER_COLS = ["name", "site", "nodes", "ha", "version", "availability", "performance"];
+const BACKUP_COLS = ["id", "job", "job_type", "status", "last_run", "size", "site"];
+const REPORT_COLS = ["id", "name", "cadence", "audience", "description"];
+const SWITCH_COLS = ["name", "site", "vendor", "ports", "status", "note"];
+const ARRAY_COLS = ["name", "site", "kind", "usable", "used_pct", "status"];
+const OPERATOR_COLS = ["name", "role", "sites", "auth", "status"];
+const TARGET_COLS = ["id", "name", "site", "free_space", "status"];
+const RESTORE_COLS = ["id", "workload", "points", "latest", "site"];
+const POLICY_COLS = ["id", "name", "retention", "copy_to", "scope"];
+const COLLECTOR_COLS = ["id", "name", "scope", "interval", "status"];
 const DR_SERVICE_COLS = ["id", "name", "site", "standby_site", "tier", "status", "mode", "rpo", "rto", "owner"];
 const DR_HOST_COLS = ["id", "name", "site", "pair", "status", "cpu", "mem", "ip"];
 const DR_CLUSTER_COLS = ["id", "name", "site", "kind", "nodes", "status"];
@@ -187,6 +242,39 @@ function subRow(row: Subscription) {
 }
 function activityRow(row: Activity) {
   return [row.id, row.text, row.when];
+}
+function serviceRow(row: ComputeService) {
+  return [row.name, row.site, row.health, row.instances, row.availability, row.performance, row.note];
+}
+function clusterRow(row: ComputeCluster) {
+  return [row.name, row.site, row.nodes, row.ha, row.version, row.availability, row.performance];
+}
+function backupRow(row: BackupJob) {
+  return [row.id, row.job, row.type, row.status, row.last, row.size, row.site];
+}
+function reportRow(row: ReportDef) {
+  return [row.id, row.name, row.cadence, row.audience, row.description];
+}
+function switchRow(row: SanSwitch) {
+  return [row.name, row.site, row.vendor, row.ports, row.status, row.note];
+}
+function arrayRow(row: StorageArray) {
+  return [row.name, row.site, row.kind, row.usable, row.used, row.status];
+}
+function operatorRow(row: Operator) {
+  return [row.name, row.role, row.sites, row.auth, row.status];
+}
+function targetRow(row: BackupTarget) {
+  return [row.id, row.name, row.site, row.free, row.status];
+}
+function restoreRow(row: RestorePoint) {
+  return [row.id, row.workload, row.points, row.latest, row.site];
+}
+function policyRow(row: BackupPolicy) {
+  return [row.id, row.name, row.retention, row.copy, row.scope];
+}
+function collectorRow(row: Collector) {
+  return [row.id, row.name, row.scope, row.interval, row.status];
 }
 function drServiceRow(row: DrService) {
   return [row.id, row.name, row.site, row.standbySite, row.tier, row.status, row.mode, row.rpo, row.rto, row.owner];
@@ -300,6 +388,39 @@ function subFrom(row: Record<string, unknown>): Subscription {
 }
 function activityFrom(row: Record<string, unknown>): Activity {
   return { id: str(row.id), text: str(row.text), when: str(row.at) };
+}
+function serviceFrom(row: Record<string, unknown>): ComputeService {
+  return { name: str(row.name), site: str(row.site) as ComputeService["site"], health: str(row.health) as ComputeService["health"], instances: Number(row.instances), availability: Number(row.availability), performance: Number(row.performance), note: str(row.note) };
+}
+function clusterFrom(row: Record<string, unknown>): ComputeCluster {
+  return { name: str(row.name), site: str(row.site) as ComputeCluster["site"], nodes: Number(row.nodes), ha: str(row.ha) as ComputeCluster["ha"], version: str(row.version), availability: Number(row.availability), performance: Number(row.performance) };
+}
+function backupFrom(row: Record<string, unknown>): BackupJob {
+  return { id: str(row.id), job: str(row.job), type: str(row.job_type), status: str(row.status) as BackupJob["status"], last: str(row.last_run), size: str(row.size), site: str(row.site) as BackupJob["site"] };
+}
+function reportFrom(row: Record<string, unknown>): ReportDef {
+  return { id: str(row.id), name: str(row.name), cadence: str(row.cadence), audience: str(row.audience), description: str(row.description) };
+}
+function switchFrom(row: Record<string, unknown>): SanSwitch {
+  return { name: str(row.name), site: str(row.site) as SanSwitch["site"], vendor: str(row.vendor), ports: Number(row.ports), status: str(row.status) as SanSwitch["status"], note: str(row.note) };
+}
+function arrayFrom(row: Record<string, unknown>): StorageArray {
+  return { name: str(row.name), site: str(row.site) as StorageArray["site"], kind: str(row.kind), usable: str(row.usable), used: Number(row.used_pct), status: str(row.status) as StorageArray["status"] };
+}
+function operatorFrom(row: Record<string, unknown>): Operator {
+  return { name: str(row.name), role: str(row.role), sites: str(row.sites), auth: str(row.auth), status: str(row.status) as Operator["status"] };
+}
+function targetFrom(row: Record<string, unknown>): BackupTarget {
+  return { id: str(row.id), name: str(row.name), site: str(row.site) as BackupTarget["site"], free: str(row.free_space), status: str(row.status) as BackupTarget["status"] };
+}
+function restoreFrom(row: Record<string, unknown>): RestorePoint {
+  return { id: str(row.id), workload: str(row.workload), points: Number(row.points), latest: str(row.latest), site: str(row.site) as RestorePoint["site"] };
+}
+function policyFrom(row: Record<string, unknown>): BackupPolicy {
+  return { id: str(row.id), name: str(row.name), retention: str(row.retention), copy: str(row.copy_to), scope: str(row.scope) };
+}
+function collectorFrom(row: Record<string, unknown>): Collector {
+  return { id: str(row.id), name: str(row.name), scope: str(row.scope), interval: str(row.interval), status: str(row.status) as Collector["status"] };
 }
 function drServiceFrom(row: Record<string, unknown>): DrService {
   return { id: str(row.id), name: str(row.name), site: str(row.site) as DrService["site"], standbySite: str(row.standby_site) as DrService["standbySite"], tier: str(row.tier), status: str(row.status) as DrService["status"], mode: str(row.mode) as DrService["mode"], rpo: str(row.rpo), rto: str(row.rto), owner: str(row.owner) };

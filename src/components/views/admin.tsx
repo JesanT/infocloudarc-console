@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Button, Empty, Field, Kpi, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
-import { ARRAYS, BACKUPS, REPORTS, inScope, matches, siteLabel } from "@/lib/cloud/model";
+import { inScope, matches, siteLabel } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
 
 export function RepositoryView() {
@@ -116,11 +116,14 @@ export function ReportsView() {
   const subscriptions = useCloud((s) => s.subscriptions);
   const repositories = useCloud((s) => s.repositories);
   const activity = useCloud((s) => s.activity);
+  const reports = useCloud((s) => s.reports);
+  const backups = useCloud((s) => s.backups);
+  const arrays = useCloud((s) => s.arrays);
   const flash = useCloud((s) => s.flash);
-  const [active, setActive] = useState(REPORTS[0].id);
+  const [active, setActive] = useState(reports[0]?.id ?? "");
   const [built, setBuilt] = useState<Built | null>(null);
 
-  const defs = REPORTS.filter((report) => {
+  const defs = reports.filter((report) => {
     if (role === "site" && (report.id === "rpt-subs" || report.id === "rpt-capacity")) return false;
     return true;
   });
@@ -128,7 +131,7 @@ export function ReportsView() {
   const preview = useMemo(() => built, [built]);
 
   function run() {
-    const def = REPORTS.find((item) => item.id === active);
+    const def = reports.find((item) => item.id === active);
     if (!def) return;
     if (role !== "vendor" && def.id === "rpt-subs") {
       flash("Subscription reports require vendor access.");
@@ -146,6 +149,8 @@ export function ReportsView() {
       subscriptions,
       repositories,
       activity,
+      backups,
+      arrays,
     });
     setBuilt(next);
     flash(`Ran ${def.name}.`);
@@ -220,6 +225,8 @@ function compose(
     subscriptions: ReturnType<typeof useCloud.getState>["subscriptions"];
     repositories: ReturnType<typeof useCloud.getState>["repositories"];
     activity: ReturnType<typeof useCloud.getState>["activity"];
+    backups: ReturnType<typeof useCloud.getState>["backups"];
+    arrays: ReturnType<typeof useCloud.getState>["arrays"];
   },
 ): Built {
   const { role, site } = source;
@@ -233,7 +240,7 @@ function compose(
   }
   if (id === "rpt-capacity") {
     const vms = source.instances.filter((item) => inScope(role, site, item.site));
-    const arrays = ARRAYS.filter((item) => inScope(role, site, item.site));
+    const arrays = source.arrays.filter((item) => inScope(role, site, item.site));
     const repos = source.repositories.filter((item) => inScope(role, site, item.site));
     return {
       title: "Capacity and utilization",
@@ -246,7 +253,7 @@ function compose(
     };
   }
   if (id === "rpt-backup") {
-    const rows = BACKUPS.filter((item) => inScope(role, site, item.site));
+    const rows = source.backups.filter((item) => inScope(role, site, item.site));
     return {
       title: "Backup compliance",
       columns: ["Job", "Site", "Status", "Last", "Size"],

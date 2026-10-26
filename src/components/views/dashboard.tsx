@@ -2,13 +2,6 @@ import { Kpi, Panel, StatusPill } from "@/components/ui";
 import { Trend } from "@/components/charts";
 import { isPolled } from "@/lib/cloud/fabric";
 import {
-  ARRAYS,
-  BACKUPS,
-  CLUSTERS,
-  REPORTS,
-  SERVICES,
-  SWITCHES,
-  USERS,
   inScope,
   siteLabel,
   type SiteKey,
@@ -44,12 +37,13 @@ export function Dashboard() {
   const repositories = useCloud((s) => s.repositories).filter((item) => inScope(role, site, item.site));
   const subscriptions = useCloud((s) => s.subscriptions).filter((item) => inScope(role, site, item.site));
   const ports = useCloud((s) => s.ports).filter((port) => inventory.some((item) => item.id === port.assetId));
-  const services = SERVICES.filter((item) => inScope(role, site, item.site));
-  const clusters = CLUSTERS.filter((item) => inScope(role, site, item.site));
-  const san = SWITCHES.filter((item) => inScope(role, site, item.site));
-  const arrays = ARRAYS.filter((item) => inScope(role, site, item.site));
-  const jobs = BACKUPS.filter((item) => inScope(role, site, item.site));
-  const users = USERS.filter((user) => {
+  const services = useCloud((s) => s.services).filter((item) => inScope(role, site, item.site));
+  const clusters = useCloud((s) => s.clusters).filter((item) => inScope(role, site, item.site));
+  const san = useCloud((s) => s.switches).filter((item) => inScope(role, site, item.site));
+  const arrays = useCloud((s) => s.arrays).filter((item) => inScope(role, site, item.site));
+  const jobs = useCloud((s) => s.backups).filter((item) => inScope(role, site, item.site));
+  const reports = useCloud((s) => s.reports);
+  const users = useCloud((s) => s.operators).filter((user) => {
     if (role === "site") return user.sites === "Site-East";
     if (site === "west") return user.sites !== "Site-East";
     if (site === "east") return user.sites !== "Site-West";
@@ -152,7 +146,7 @@ export function Dashboard() {
         ["inventory", "Inventory", `${inventory.length} assets, ${offline} offline`, offline ? "Critical" : degradedAssets ? "Warning" : "Healthy"],
         ["repository", "Repository", `${repositories.length} catalogs`, repoWatch ? "Warning" : "Healthy"],
         ["subscriptions", "Subscriptions", `${licenseWatch.length} need review`, licenseWatch.length ? "Warning" : "Healthy"],
-        ["reports", "Reports", `${REPORTS.length} scheduled`, "Healthy"],
+        ["reports", "Reports", `${reports.length} scheduled`, "Healthy"],
       ],
     },
   ];
