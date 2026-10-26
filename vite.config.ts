@@ -142,7 +142,39 @@ function authPopupPlugin(): Plugin {
   };
 }
 
-// `0.0.0.0:8080` is the live-preview contract — don't change host/port.
+/**
+ * Dev-only. TanStack Start rejects a server-function call until that file has
+ * been compiled in this process, and its own recovery compile does not
+ * register the id. An already-open browser tab calls saveConsole the moment
+ * the dev server comes back, so compile these files before traffic.
+ */
+function warmServerFnsPlugin(): Plugin {
+  const files = [
+    "src/lib/cloud/persist.ts",
+    "src/lib/cloud/guest.ts",
+    "src/lib/cloud/hyperv.ts",
+    "src/lib/cloud/hypervisor-probe.ts",
+    "src/lib/cloud/app-probe.ts",
+    "src/lib/cloud/engine-probe.ts",
+    "src/lib/cloud/discover.ts",
+    "src/lib/app-data/readiness.ts",
+  ];
+  return {
+    name: "infocloudarc:warm-server-fns",
+    apply: "serve",
+    async configureServer(server) {
+      const ssr = server.environments?.ssr;
+      if (!ssr) return;
+      for (const file of files) {
+        try {
+          await ssr.transformRequest(join(server.config.root, file));
+        } catch (err) {
+          console.error("[infocloudarc] could not prepare", file, err);
+        }
+      }
+    },
+  };
+}
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
 export default defineConfig(({ command, isPreview }) => ({
@@ -167,6 +199,7 @@ export default defineConfig(({ command, isPreview }) => ({
     grokPwaPlugin(),
     tailwindcss(),
     tanstackStart(),
+    warmServerFnsPlugin(),
     ...(command === "build" || isPreview
       ? [
           nitro({
