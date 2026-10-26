@@ -32,4 +32,4 @@ npm run build
 npx vite preview --host 0.0.0.0 --port 8080
 ```
 
-Open `http://<server>:8080/`. Inventory, network polls, and Service DR are saved on the server in `data/pglite` and come back after a refresh or a process restart. Set `DATABASE_URL` to use Postgres instead of that local database. Sign-in is still the role switcher; real operator accounts are next.
+Open `http://<server>:8080/`. Inventory, virtual machines, services, databases, clusters, ports, backup jobs, and Service DR are stored in separate tables under `data/pglite`. A refresh or a restart of the preview process keeps them. Set `DATABASE_URL` to use Postgres instead. Sign-in is still the role switcher.

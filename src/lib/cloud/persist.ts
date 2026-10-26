@@ -96,8 +96,9 @@ export function useConsolePersistence() {
 
     void loadConsole()
       .then((raw) => {
-        if (stop || !raw) return;
-        apply(JSON.parse(raw) as ConsolePayload);
+        if (stop) return;
+        if (raw) apply(JSON.parse(raw) as ConsolePayload);
+        else schedule();
       })
       .catch(() => undefined)
       .finally(() => {
