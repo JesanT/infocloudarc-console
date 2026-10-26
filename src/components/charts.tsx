@@ -6,10 +6,12 @@ export function Trend({
   data,
   aLabel,
   bLabel,
+  className = "h-28",
 }: {
   data: Point[];
   aLabel: string;
   bLabel: string;
+  className?: string;
 }) {
   const [lib, setLib] = useState<typeof import("recharts") | null>(null);
 
@@ -23,12 +25,12 @@ export function Trend({
     };
   }, []);
 
-  if (!lib) return <div className="h-52 rounded-lg bg-inset" />;
+  if (!lib) return <div className={`${className} rounded-lg bg-inset`} />;
 
   const { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } = lib;
 
   return (
-    <div className="h-52">
+    <div className={className}>
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid stroke="var(--color-line)" vertical={false} />

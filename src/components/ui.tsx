@@ -31,7 +31,7 @@ export function Panel({
   className?: string;
 }) {
   return (
-    <section className={`rounded-2xl border border-line bg-panel p-4 md:p-5 ${className}`}>
+    <section className={`rounded-2xl border border-line bg-white p-4 shadow-[0_10px_28px_rgba(232,93,4,0.06)] md:p-5 ${className}`}>
       {(title || action) && (
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -48,10 +48,11 @@ export function Panel({
 
 export function Kpi({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="rounded-2xl border border-line bg-panel p-4">
+    <div className="relative overflow-hidden rounded-2xl border border-line bg-white p-4 shadow-[0_10px_28px_rgba(232,93,4,0.06)]">
+      <span className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#ffb070] to-[#e85d04]" />
       <div className="text-xs font-medium tracking-wide text-faint uppercase">{label}</div>
       <div className="mt-2 font-mono text-2xl font-medium text-ink tabular-nums">{value}</div>
-      {hint && <div className="mt-1 text-sm text-muted">{hint}</div>}
+      {hint && <div className="mt-1 text-xs leading-snug text-muted">{hint}</div>}
     </div>
   );
 }
@@ -62,8 +63,8 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 
 export function Button({ variant = "ghost", className = "", type = "button", ...props }: ButtonProps) {
   const styles = {
-    primary: "bg-accent text-accent-ink hover:bg-ink",
-    ghost: "border border-line bg-inset text-ink hover:border-line-strong",
+    primary: "bg-gradient-to-r from-[#ff8a3d] to-[#e85d04] text-white shadow-[0_8px_18px_rgba(232,93,4,0.28)] hover:opacity-95",
+    ghost: "border border-line bg-white text-ink hover:border-[#e85d04] hover:text-[#c2410c]",
     danger: "border border-danger/40 bg-danger/10 text-danger hover:bg-danger/20",
   }[variant];
   return (
@@ -91,7 +92,7 @@ export function Field({
 }
 
 export const fieldClass =
-  "h-11 rounded-md border border-line bg-canvas px-3 text-sm text-ink outline-none placeholder:text-faint";
+  "h-11 rounded-md border border-line bg-white px-3 text-sm text-ink outline-none placeholder:text-faint";
 
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
   return <select {...props} className={`${fieldClass} ${props.className ?? ""}`} />;

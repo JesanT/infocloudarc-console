@@ -332,6 +332,17 @@ export const VIEW_TITLES: Record<string, string> = {
   repository: "Repository",
   subscriptions: "Subscriptions",
   reports: "Reports",
+  "dr-app-tomcat": "Apache Tomcat",
+  "dr-app-iis": "IIS",
+  "dr-app-other": "Other applications",
+  "dr-app-all": "All applications",
+  "dr-db-mssql": "MSSQL Service",
+  "dr-db-mysql": "MYSQL Service",
+  "dr-db-mongodb": "Mongodb",
+  "dr-db-postgresql": "PostgreSQL",
+  "dr-db-other": "Other databases",
+  "dr-db-all": "All databases",
+  "dr-all": "All services",
 };
 
 export function matches(query: string, parts: Array<string | number>): boolean {

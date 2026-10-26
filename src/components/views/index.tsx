@@ -15,7 +15,9 @@ import {
 } from "@/components/views/platform";
 import { InventoryView } from "@/components/views/inventory";
 import { ReportsView, RepositoryView, SubscriptionsView } from "@/components/views/admin";
+import { ServiceDrView } from "@/components/views/service-dr";
 import { Panel } from "@/components/ui";
+import type { AppKind, DbKind } from "@/lib/cloud/dr";
 
 export function View({ id }: { id: string }) {
   switch (id) {
@@ -71,6 +73,20 @@ export function View({ id }: { id: string }) {
       return <SubscriptionsView />;
     case "reports":
       return <ReportsView />;
+    case "dr-all":
+      return <ServiceDrView focus={{ domain: "all" }} />;
+    case "dr-app-tomcat":
+    case "dr-app-iis":
+    case "dr-app-other":
+    case "dr-app-all":
+      return <ServiceDrView focus={{ domain: "app", kind: id.replace("dr-app-", "") as AppKind | "all" }} />;
+    case "dr-db-mssql":
+    case "dr-db-mysql":
+    case "dr-db-mongodb":
+    case "dr-db-postgresql":
+    case "dr-db-other":
+    case "dr-db-all":
+      return <ServiceDrView focus={{ domain: "db", kind: id.replace("dr-db-", "") as DbKind | "all" }} />;
     default:
       return <Panel title="Unknown view">That section is not available.</Panel>;
   }
