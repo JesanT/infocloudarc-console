@@ -40,6 +40,12 @@ export type Instance = {
   connections?: number;
   hostId?: string | null;
   clusterName?: string | null;
+  hypervisorId?: string;
+  templateId?: string;
+  imageId?: string;
+  configPath?: string;
+  diskPath?: string;
+  swapPath?: string;
 };
 
 export type PhysicalHost = {
@@ -546,6 +552,7 @@ export const VIEW_TITLES: Record<string, string> = {
   licensing: "Licensing",
   inventory: "Inventory",
   hypervisors: "Hypervisors",
+  deployment: "Deployment",
   repository: "Repository",
   subscriptions: "Subscriptions",
   reports: "Reports",

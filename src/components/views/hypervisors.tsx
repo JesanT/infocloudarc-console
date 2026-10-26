@@ -20,6 +20,9 @@ function blank(site: SiteKey): Hypervisor {
     clusterName: "",
     switchName: defaults.switchName,
     storage: defaults.storage,
+    configRepoId: "",
+    diskRepoId: "",
+    swapRepoId: "",
     hostId: "",
     uri: "",
     detail: "",
@@ -32,6 +35,7 @@ export function HypervisorsView() {
   const query = useCloud((s) => s.query);
   const rows = useCloud((s) => s.hypervisors);
   const hosts = useCloud((s) => s.hosts);
+  const repos = useCloud((s) => s.deployRepos);
   const save = useCloud((s) => s.saveHypervisor);
   const remove = useCloud((s) => s.deleteHypervisor);
   const flash = useCloud((s) => s.flash);
@@ -42,6 +46,7 @@ export function HypervisorsView() {
   const [draft, setDraft] = useState<Hypervisor | null>(null);
   const [busy, setBusy] = useState("");
   const [note, setNote] = useState("");
+  const repoChoices = repos.filter((item) => inScope(role, site, item.site));
   const hyperv = visible.filter((item) => item.kind === "hyper-v").length;
   const libvirt = visible.filter((item) => item.kind === "libvirt").length;
 
@@ -154,8 +159,26 @@ export function HypervisorsView() {
             <Field label={draft.kind === "libvirt" ? "Bridge" : "Virtual switch"}>
               <input className={fieldClass} value={draft.switchName} onChange={(event) => setDraft({ ...draft, switchName: event.target.value })} />
             </Field>
-            <Field label={draft.kind === "libvirt" ? "Storage pool" : "Virtual disk path"}>
+            <Field label={draft.kind === "libvirt" ? "Fallback pool" : "Fallback path"}>
               <input className={fieldClass} value={draft.storage} onChange={(event) => setDraft({ ...draft, storage: event.target.value })} />
+            </Field>
+            <Field label="VM machine files">
+              <Select value={draft.configRepoId} onChange={(event) => setDraft({ ...draft, configRepoId: event.target.value })}>
+                <option value="">None</option>
+                {repoChoices.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </Select>
+            </Field>
+            <Field label="VM storage">
+              <Select value={draft.diskRepoId} onChange={(event) => setDraft({ ...draft, diskRepoId: event.target.value })}>
+                <option value="">None</option>
+                {repoChoices.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </Select>
+            </Field>
+            <Field label="Swap files">
+              <Select value={draft.swapRepoId} onChange={(event) => setDraft({ ...draft, swapRepoId: event.target.value })}>
+                <option value="">None</option>
+                {repoChoices.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </Select>
             </Field>
             <Field label="Compute host">
               <Select value={draft.hostId} onChange={(event) => setDraft({ ...draft, hostId: event.target.value })}>
@@ -170,7 +193,7 @@ export function HypervisorsView() {
               <Button variant="primary" type="submit">Save</Button>
               <Button type="button" disabled={busy === (draft.id || "draft")} onClick={() => void runCheck(draft)}>{busy === (draft.id || "draft") ? "Checking…" : "Check"}</Button>
               <Button type="button" onClick={() => setDraft(null)}>Cancel</Button>
-              <p className="text-xs text-muted">{hypervisorUri(draft) || "Add an address to build the connection."} A password is never stored.</p>
+              <p className="text-xs text-muted">{hypervisorUri(draft) || "Add an address to build the connection."} A password is never stored. Machine files, disks, and swap use Deployment repositories. The fallback path is used only when VM storage is empty and the value is a real path.</p>
             </div>
           </form>
         )}
@@ -203,7 +226,7 @@ export function HypervisorsView() {
                       <Td>{row.kind === "libvirt" ? "Libvirt" : "Hyper-V"}</Td>
                       <Td>{siteLabel(row.site)}</Td>
                       <Td>{row.address}:{row.port} · {row.transport}{row.login ? ` · ${row.login}` : ""}</Td>
-                      <Td>{row.switchName || "—"} · {row.storage || "—"}</Td>
+                      <Td>{row.switchName || "—"} · {repos.find((item) => item.id === row.diskRepoId)?.name || row.storage || "—"}</Td>
                       <Td><StatusPill value={row.status} /></Td>
                       <Td>
                         <div className="flex flex-wrap gap-2">

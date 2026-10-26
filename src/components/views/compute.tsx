@@ -4,9 +4,10 @@ import { Trend } from "@/components/charts";
 import { Button, Empty, Field, Kpi, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
 import { appReading, defaultAppPath } from "@/lib/cloud/app-score";
 import { readApplication } from "@/lib/cloud/app-probe";
+import { placeInstance } from "@/lib/cloud/deploy";
 import { defaultPort, engineReading, engineSupported, statusFrom } from "@/lib/cloud/engine-score";
 import { readEngine } from "@/lib/cloud/engine-probe";
-import { hypervAction } from "@/lib/cloud/hyperv";
+import { guestAction } from "@/lib/cloud/guest";
 import { boundSite, canMutateSite, inScope, matches, siteLabel, siteOptions, type ComputeCluster, type ComputeService, type Instance, type PhysicalHost, type SiteKey, type WorkloadApp, type WorkloadDatabase } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
 import { chartPoints, currentHour, hourLabel, rollup, sampleId, type SampleKind } from "@/lib/cloud/uptime";
@@ -661,26 +662,35 @@ export function InstanceOpsView() {
   const site = useCloud((s) => s.site);
   const query = useCloud((s) => s.query);
   const instances = useCloud((s) => s.instances);
+  const hypervisors = useCloud((s) => s.hypervisors);
+  const templates = useCloud((s) => s.deployTemplates);
+  const images = useCloud((s) => s.deployImages);
+  const repos = useCloud((s) => s.deployRepos);
   const act = useCloud((s) => s.vmAction);
   const deploy = useCloud((s) => s.deployInstance);
+  const update = useCloud((s) => s.updateInstance);
+  const remove = useCloud((s) => s.deleteInstance);
   const flash = useCloud((s) => s.flash);
-  const [host, setHost] = useState("");
-  const [probe, setProbe] = useState("Checking PowerShell…");
   const [busy, setBusy] = useState("");
   const [name, setName] = useState("");
-  const [target, setTarget] = useState<SiteKey>("east");
-  const [kind, setKind] = useState<Instance["kind"]>("Compute");
-  const [os, setOs] = useState("Ubuntu 22.04");
-  const rows = instances.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.ip, item.os, item.kind]));
-  const choices = siteOptions(role, site);
+  const [hvId, setHvId] = useState("");
+  const [tplId, setTplId] = useState("");
+  const [editId, setEditId] = useState("");
+  const [editHvId, setEditHvId] = useState("");
+  const [editTplId, setEditTplId] = useState("");
+  const rows = instances.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.ip, item.os, item.kind, item.diskPath ?? "", item.configPath ?? ""]));
+  const hvChoices = hypervisors.filter((item) => inScope(role, site, item.site));
+  const selectedHv = hvChoices.find((item) => item.id === hvId) ?? hvChoices[0];
+  const tplChoices = templates.filter((item) => inScope(role, site, item.site) && (!selectedHv || item.site === selectedHv.site));
+  const selectedTpl = tplChoices.find((item) => item.id === tplId) ?? tplChoices[0];
+  const selectedImage = images.find((item) => item.id === selectedTpl?.imageId) ?? null;
+  const preview = selectedHv && selectedTpl
+    ? placeInstance({ name: name.trim() || "new-vm", hypervisor: selectedHv, image: selectedImage, template: selectedTpl, repositories: repos })
+    : null;
 
-  useEffect(() => {
-    const saved = window.localStorage.getItem("infocloudarc-hv-host") ?? "";
-    setHost(saved);
-    void hypervAction({ data: { action: "probe", computer: saved, role } })
-      .then((result) => setProbe(result.fallback ? result.message : `PowerShell is ready. ${saved ? `Commands target ${saved}.` : "No host set, so commands stay on this server."}`))
-      .catch(() => setProbe("Could not check PowerShell."));
-  }, [role]);
+  function linked(vm: Instance) {
+    return hypervisors.find((item) => item.id === vm.hypervisorId) ?? null;
+  }
 
   async function run(action: "stop" | "restart" | "shutdown" | "deploy", vmName: string, vm?: Instance) {
     if (vm && !canMutateSite(role, site, vm.site)) {
@@ -688,17 +698,85 @@ export function InstanceOpsView() {
       flash(`Site access cannot change workloads outside ${siteLabel(home === "all" ? "east" : home)}.`);
       return;
     }
+    if (action === "deploy") {
+      if (role !== "vendor") {
+        flash("Only vendor access can deploy instances.");
+        return;
+      }
+      if (!selectedHv || !selectedTpl || !preview) {
+        flash("Choose a hypervisor and a template. Add both under Administration if the lists are empty.");
+        return;
+      }
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(vmName)) {
+        flash("Instance name is not valid.");
+        return;
+      }
+      if (instances.some((item) => item.name === vmName)) {
+        flash("An instance with that name already exists.");
+        return;
+      }
+      if (!preview.diskPath) {
+        flash(preview.note || "This hypervisor has no disk repository.");
+        return;
+      }
+    }
     setBusy(vmName + action);
     try {
-      const result = await hypervAction({ data: { action, name: vmName, computer: host, role } });
+      const hv = action === "deploy" ? selectedHv : vm ? linked(vm) : null;
+      const shape = action === "deploy" && preview ? preview : null;
+      if (action !== "deploy" && vm && !hv) {
+        act(vm.id, action);
+        flash(`No hypervisor is linked to ${vm.name}, so only the console record changed.`);
+        return;
+      }
+      if (!hv) {
+        flash("Choose a hypervisor.");
+        return;
+      }
+      const result = await guestAction({
+        data: {
+          action,
+          kind: hv.kind,
+          name: vmName,
+          address: hv.address,
+          port: hv.port,
+          login: hv.login,
+          memoryMb: shape?.memoryMb ?? 2048,
+          vcpu: shape?.vcpu ?? 2,
+          diskGb: shape?.diskGb ?? 40,
+          switchName: hv.switchName,
+          configPath: shape?.configPath ?? vm?.configPath ?? "",
+          diskPath: shape?.diskPath ?? vm?.diskPath ?? "",
+          imagePath: shape?.imagePath ?? "",
+          format: shape?.format ?? (hv.kind === "hyper-v" ? "vhdx" : "qcow2"),
+          role,
+        },
+      });
       if (!result.ok && !result.fallback) {
         flash(result.message);
         return;
       }
-      if (action === "deploy") deploy({ name: vmName, site: target, kind, os });
-      else if (vm) act(vm.id, action);
-      if (result.fallback) flash(result.message);
-      else if (result.ok && action !== "deploy") flash(`${action === "stop" ? "Stopped" : action === "restart" ? "Restarted" : "Shut down"} ${vmName} on Hyper-V.`);
+      if (action === "deploy" && selectedHv && selectedTpl && preview) {
+        deploy({
+          name: vmName,
+          site: selectedHv.site,
+          kind: preview.instanceKind,
+          os: preview.os,
+          hypervisorId: selectedHv.id,
+          templateId: selectedTpl.id,
+          imageId: selectedImage?.id ?? "",
+          hostId: selectedHv.hostId || null,
+          clusterName: selectedHv.clusterName || null,
+          configPath: preview.configPath,
+          diskPath: preview.diskPath,
+          swapPath: preview.swapPath,
+          started: result.ok && !result.fallback,
+        });
+        setName("");
+      } else if (vm && action !== "deploy") {
+        act(vm.id, action);
+      }
+      if (result.fallback || (action === "deploy" && result.ok)) flash(result.message);
     } catch (error) {
       flash(error instanceof Error ? error.message : "The operation failed.");
     } finally {
@@ -706,67 +784,75 @@ export function InstanceOpsView() {
     }
   }
 
+  function saveEdit(vm: Instance) {
+    const hv = hvChoices.find((item) => item.id === editHvId && item.site === vm.site) ?? hvChoices.find((item) => item.site === vm.site);
+    const sameSite = templates.filter((item) => inScope(role, site, item.site) && item.site === vm.site);
+    const tpl = sameSite.find((item) => item.id === editTplId) ?? sameSite[0];
+    const image = images.find((item) => item.id === tpl?.imageId) ?? null;
+    if (!hv || !tpl) {
+      flash("Choose a hypervisor on the same site and a template. This does not move the virtual machine.");
+      return;
+    }
+    const placed = placeInstance({ name: vm.name, hypervisor: hv, image, template: tpl, repositories: repos });
+    update(vm.id, {
+      hypervisorId: hv.id,
+      templateId: tpl.id,
+      imageId: image?.id ?? "",
+      hostId: hv.hostId || null,
+      clusterName: hv.clusterName || null,
+      configPath: placed.configPath,
+      diskPath: placed.diskPath,
+      swapPath: placed.swapPath,
+    });
+    setEditId("");
+  }
+
   return (
     <div className="space-y-4">
-      <Panel title="Hyper-V connection" subtitle={probe}>
-        <form
-          className="grid gap-3 md:grid-cols-[1fr_auto]"
-          onSubmit={(event) => {
-            event.preventDefault();
-            window.localStorage.setItem("infocloudarc-hv-host", host.trim());
-            void hypervAction({ data: { action: "probe", computer: host.trim(), role } }).then((result) => {
-              setProbe(result.fallback ? result.message : `PowerShell is ready. ${host.trim() ? `Commands target ${host.trim()}.` : "Commands stay on this server."}`);
-            });
-          }}
-        >
-          <Field label="Hyper-V host">
-            <input className={fieldClass} value={host} onChange={(event) => setHost(event.target.value)} placeholder="hv-east-01" />
-          </Field>
-          <div className="flex items-end">
-            <Button type="submit">Check</Button>
-          </div>
-        </form>
-      </Panel>
-
       {role === "vendor" ? (
-        <Panel title="Deploy instance" subtitle="Vendor only. Creates the VM in the console, and on Hyper-V when PowerShell can reach the host.">
-          <form
-            className="grid gap-3 md:grid-cols-5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void run("deploy", name.trim());
-              setName("");
-            }}
-          >
-            <Field label="Name">
-              <input className={fieldClass} value={name} onChange={(event) => setName(event.target.value)} placeholder="app-03" />
-            </Field>
-            <Field label="Site">
-              <Select value={choices.includes(target) ? target : choices[0]} onChange={(event) => setTarget(event.target.value as SiteKey)}>
-                {choices.map((item) => (
-                  <option key={item} value={item}>{siteLabel(item)}</option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Kind">
-              <Select value={kind} onChange={(event) => setKind(event.target.value as Instance["kind"])}>
-                <option>Compute</option>
-                <option>Database</option>
-                <option>Load Balancer</option>
-                <option>Backup</option>
-              </Select>
-            </Field>
-            <Field label="Image">
-              <Select value={os} onChange={(event) => setOs(event.target.value)}>
-                <option>Ubuntu 22.04</option>
-                <option>RHEL 9</option>
-                <option>HAProxy</option>
-              </Select>
-            </Field>
-            <div className="flex items-end">
-              <Button variant="primary" type="submit" className="w-full" disabled={busy.endsWith("deploy")}>Deploy</Button>
-            </div>
-          </form>
+        <Panel title="Deploy instance" subtitle="Vendor only. The template sets CPU, memory, disk, and image. The hypervisor sets where the machine file, disk, and swap are written. A timeout or a refused login is not stored as a running virtual machine.">
+          {hvChoices.length === 0 || templates.length === 0 ? (
+            <p className="text-sm text-muted">Add a hypervisor and a template under Administration before deploying.</p>
+          ) : (
+            <form
+              className="grid gap-3 md:grid-cols-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void run("deploy", name.trim());
+              }}
+            >
+              <Field label="Name">
+                <input className={fieldClass} value={name} onChange={(event) => setName(event.target.value)} placeholder="app-03" />
+              </Field>
+              <Field label="Hypervisor">
+                <Select value={selectedHv?.id ?? ""} onChange={(event) => { setHvId(event.target.value); setTplId(""); }}>
+                  {hvChoices.map((item) => (
+                    <option key={item.id} value={item.id}>{item.name} · {item.kind === "libvirt" ? "Libvirt" : "Hyper-V"} · {siteLabel(item.site)}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Template">
+                <Select value={selectedTpl?.id ?? ""} onChange={(event) => setTplId(event.target.value)}>
+                  {tplChoices.map((item) => (
+                    <option key={item.id} value={item.id}>{item.name} · {item.vcpu} CPU · {item.memoryMb} MB · {item.diskGb} GB</option>
+                  ))}
+                </Select>
+              </Field>
+              {preview && (
+                <div className="space-y-1 text-xs text-muted md:col-span-3">
+                  <p>{preview.instanceKind} · {preview.os} · {preview.vcpu} CPU · {preview.memoryMb} MB · {preview.diskGb} GB · site {selectedHv ? siteLabel(selectedHv.site) : ""}</p>
+                  <p>Machine file {preview.configPath || "not set"}</p>
+                  <p>Disk {preview.diskPath || "not set"}{preview.imagePath ? ` from ${preview.imagePath}` : ""}</p>
+                  <p>Swap {preview.swapPath || "not set"}</p>
+                  {preview.note && <p>{preview.note}</p>}
+                </div>
+              )}
+              {tplChoices.length === 0 && <p className="text-sm text-muted md:col-span-3">No template is recorded for this hypervisor’s site.</p>}
+              <div className="md:col-span-3">
+                <Button variant="primary" type="submit" disabled={busy.endsWith("deploy") || !selectedTpl}>Deploy</Button>
+              </div>
+            </form>
+          )}
         </Panel>
       ) : (
         <Panel title="Deploy instance" subtitle="Only vendor access can deploy a virtual machine.">
@@ -774,34 +860,62 @@ export function InstanceOpsView() {
         </Panel>
       )}
 
-      <Panel title="Operations" subtitle="Stop turns the VM off. Shutdown asks the guest to power off. Restart boots it again.">
+      <Panel title="Operations" subtitle="Power actions use the hypervisor linked to the instance. Remove drops the console row only. Disks on the hypervisor stay where they are.">
         {rows.length === 0 ? (
           <Empty>No instances in this view.</Empty>
         ) : (
           <TableWrap>
             <Table>
               <thead>
-                <tr><Th>Name</Th><Th>Site</Th><Th>Status</Th><Th>Host</Th><Th>Actions</Th></tr>
+                <tr><Th>Name</Th><Th>Site</Th><Th>Status</Th><Th>Hypervisor</Th><Th>Actions</Th></tr>
               </thead>
               <tbody>
-                {rows.map((vm) => (
-                  <tr key={vm.id}>
-                    <Td>
-                      <div className="font-medium">{vm.name}</div>
-                      <div className="text-xs text-faint">{vm.kind} · {vm.os}</div>
-                    </Td>
-                    <Td>{siteLabel(vm.site)}</Td>
-                    <Td><StatusPill value={vm.status} /></Td>
-                    <Td mono>{host || "local"}</Td>
-                    <Td>
-                      <div className="flex flex-wrap gap-1">
-                        <Button disabled={busy === vm.name + "stop"} onClick={() => void run("stop", vm.name, vm)}>Stop</Button>
-                        <Button disabled={busy === vm.name + "restart"} onClick={() => void run("restart", vm.name, vm)}>Restart</Button>
-                        <Button variant="danger" disabled={busy === vm.name + "shutdown"} onClick={() => void run("shutdown", vm.name, vm)}>Shutdown</Button>
-                      </div>
-                    </Td>
-                  </tr>
-                ))}
+                {rows.map((vm) => {
+                  const hv = linked(vm);
+                  const editing = editId === vm.id;
+                  const editHv = hvChoices.find((item) => item.id === editHvId && item.site === vm.site) ?? hvChoices.find((item) => item.site === vm.site);
+                  const editTpls = templates.filter((item) => inScope(role, site, item.site) && item.site === vm.site);
+                  const editTpl = editTpls.find((item) => item.id === editTplId) ?? editTpls[0];
+                  return (
+                    <tr key={vm.id}>
+                      <Td>
+                        <div className="font-medium">{vm.name}</div>
+                        <div className="text-xs text-faint">{vm.kind} · {vm.os}</div>
+                        {vm.diskPath && <div className="text-xs text-faint">{vm.diskPath}</div>}
+                        {editing && (
+                          <div className="mt-2 grid gap-2">
+                            <Select value={editHv?.id ?? ""} onChange={(event) => setEditHvId(event.target.value)}>
+                              {hvChoices.filter((item) => item.site === vm.site).map((item) => (
+                                <option key={item.id} value={item.id}>{item.name}</option>
+                              ))}
+                            </Select>
+                            <Select value={editTpl?.id ?? ""} onChange={(event) => setEditTplId(event.target.value)}>
+                              {editTpls.map((item) => (
+                                <option key={item.id} value={item.id}>{item.name}</option>
+                              ))}
+                            </Select>
+                            <div className="flex gap-1">
+                              <Button onClick={() => saveEdit(vm)}>Save</Button>
+                              <Button onClick={() => setEditId("")}>Cancel</Button>
+                            </div>
+                          </div>
+                        )}
+                      </Td>
+                      <Td>{siteLabel(vm.site)}</Td>
+                      <Td><StatusPill value={vm.status} /></Td>
+                      <Td>{hv ? hv.name : "Not linked"}</Td>
+                      <Td>
+                        <div className="flex flex-wrap gap-1">
+                          <Button disabled={busy === vm.name + "stop"} onClick={() => void run("stop", vm.name, vm)}>Stop</Button>
+                          <Button disabled={busy === vm.name + "restart"} onClick={() => void run("restart", vm.name, vm)}>Restart</Button>
+                          <Button variant="danger" disabled={busy === vm.name + "shutdown"} onClick={() => void run("shutdown", vm.name, vm)}>Shutdown</Button>
+                          <Button disabled={!canMutateSite(role, site, vm.site)} onClick={() => { setEditId(vm.id); setEditHvId(vm.hypervisorId ?? ""); setEditTplId(vm.templateId ?? ""); }}>Edit</Button>
+                          <Button disabled={!canMutateSite(role, site, vm.site)} onClick={() => remove(vm.id)}>Remove</Button>
+                        </div>
+                      </Td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </Table>
           </TableWrap>

@@ -27,6 +27,7 @@ import type {
 import type { DrAlertRow, DrApp, DrAudit, DrCluster, DrDatabase, DrHost, DrPerf, DrService, DrSignal, DrVm, DrWorkflow } from "@/lib/cloud/dr";
 import type { WorkloadSample } from "@/lib/cloud/uptime";
 import type { Hypervisor } from "@/lib/cloud/hypervisor";
+import type { DeployImage, DeployRepository, DeployTemplate } from "@/lib/cloud/deploy";
 
 export type ConsolePayload = {
   v: 1;
@@ -58,6 +59,9 @@ type CloudSnap = {
   collectors?: Collector[];
   hosts?: PhysicalHost[];
   hypervisors?: Hypervisor[];
+  deployRepos?: DeployRepository[];
+  deployImages?: DeployImage[];
+  deployTemplates?: DeployTemplate[];
   workloadApps?: WorkloadApp[];
   workloadDatabases?: WorkloadDatabase[];
   workloadSamples?: WorkloadSample[];
@@ -116,6 +120,11 @@ export async function writeConsole(payload: ConsolePayload): Promise<void> {
     await replaceRows(sql, "compute_services", SERVICE_COLS, (cloud.services ?? []).map(serviceRow));
     await replaceRows(sql, "physical_hosts", HOST_COLS, (cloud.hosts ?? []).map(hostRow));
     await replaceRows(sql, "hypervisors", HYPERVISOR_COLS, (cloud.hypervisors ?? []).map(hypervisorRow));
+    await replaceRows(sql, "deploy_images", [], []);
+    await replaceRows(sql, "deploy_templates", [], []);
+    await replaceRows(sql, "deploy_repositories", REPO_DEPLOY_COLS, (cloud.deployRepos ?? []).map(deployRepoRow));
+    await replaceRows(sql, "deploy_images", IMAGE_COLS, (cloud.deployImages ?? []).map(deployImageRow));
+    await replaceRows(sql, "deploy_templates", TEMPLATE_COLS, (cloud.deployTemplates ?? []).map(deployTemplateRow));
     await replaceRows(sql, "instances", INSTANCE_COLS, (cloud.instances ?? []).map(instanceRow));
     await replaceRows(sql, "workload_apps", WORKLOAD_APP_COLS, (cloud.workloadApps ?? []).map(workloadAppRow));
     await replaceRows(sql, "workload_databases", WORKLOAD_DB_COLS, (cloud.workloadDatabases ?? []).map(workloadDbRow));
@@ -192,6 +201,9 @@ async function assemble(): Promise<ConsolePayload> {
       collectors: (await sql<Record<string, unknown>>`select * from monitor_collectors order by name`).map(collectorFrom),
       hosts: (await sql<Record<string, unknown>>`select * from physical_hosts order by name`).map(hostFrom),
       hypervisors: (await sql<Record<string, unknown>>`select * from hypervisors order by name`).map(hypervisorFrom),
+      deployRepos: (await sql<Record<string, unknown>>`select * from deploy_repositories order by name`).map(deployRepoFrom),
+      deployImages: (await sql<Record<string, unknown>>`select * from deploy_images order by name`).map(deployImageFrom),
+      deployTemplates: (await sql<Record<string, unknown>>`select * from deploy_templates order by name`).map(deployTemplateFrom),
       workloadApps: (await sql<Record<string, unknown>>`select * from workload_apps order by name`).map(workloadAppFrom),
       workloadDatabases: (await sql<Record<string, unknown>>`select * from workload_databases order by name`).map(workloadDbFrom),
       workloadSamples: (await sql<Record<string, unknown>>`select * from workload_samples order by hour`).map(sampleFrom),
@@ -212,7 +224,7 @@ async function assemble(): Promise<ConsolePayload> {
   };
 }
 
-const INSTANCE_COLS = ["id", "name", "site", "status", "cpu", "mem", "ip", "kind", "os", "in_mbps", "out_mbps", "connections", "host_id", "cluster_name"];
+const INSTANCE_COLS = ["id", "name", "site", "status", "cpu", "mem", "ip", "kind", "os", "in_mbps", "out_mbps", "connections", "host_id", "cluster_name", "hypervisor_id", "template_id", "image_id", "config_path", "disk_path", "swap_path"];
 const ASSET_COLS = ["id", "name", "category", "site", "vendor", "model", "serial", "status", "location", "owner", "ip", "mac", "device_type", "subnet", "source", "last_poll", "snmp_version", "librenms_id", "uptime", "traffic_in_mbps", "traffic_out_mbps", "ports_up", "ports_down", "sys_descr", "parent_id"];
 const PORT_COLS = ["id", "asset_id", "name", "if_index", "admin", "oper", "speed", "in_mbps", "out_mbps", "errors", "face", "port_group", "down_since", "alarm_ack"];
 const ALERT_COLS = ["id", "severity", "asset_id", "message", "at", "channel"];
@@ -248,7 +260,7 @@ const DR_ALERT_COLS = ["id", "target", "message", "severity", "state"];
 const AUDIT_COLS = ["id", "actor", "action", "target", "at"];
 
 function instanceRow(row: Instance) {
-  return [row.id, row.name, row.site, row.status, row.cpu, row.mem, row.ip, row.kind, row.os, row.inMbps ?? null, row.outMbps ?? null, row.connections ?? null, row.hostId || null, row.clusterName || null];
+  return [row.id, row.name, row.site, row.status, row.cpu, row.mem, row.ip, row.kind, row.os, row.inMbps ?? null, row.outMbps ?? null, row.connections ?? null, row.hostId || null, row.clusterName || null, row.hypervisorId ?? "", row.templateId ?? "", row.imageId ?? "", row.configPath ?? "", row.diskPath ?? "", row.swapPath ?? ""];
 }
 function assetRow(row: InventoryItem) {
   return [row.id, row.name, row.category, row.site, row.vendor, row.model, row.serial, row.status, row.location, row.owner, row.ip, row.mac, row.deviceType, row.subnet, row.source, row.lastPoll, row.snmpVersion, row.librenmsId, row.uptime, row.trafficInMbps, row.trafficOutMbps, row.portsUp, row.portsDown, row.sysDescr, row.parentId];
@@ -307,9 +319,21 @@ function collectorRow(row: Collector) {
 function hostRow(row: PhysicalHost) {
   return [row.id, row.name, row.site, row.clusterName || null, row.status, row.cpu, row.mem, row.ip];
 }
-const HYPERVISOR_COLS = ["id", "name", "site", "kind", "address", "port", "transport", "login", "status", "cluster_name", "switch_name", "storage", "host_id", "uri", "detail"];
+const HYPERVISOR_COLS = ["id", "name", "site", "kind", "address", "port", "transport", "login", "status", "cluster_name", "switch_name", "storage", "host_id", "uri", "detail", "config_repo_id", "disk_repo_id", "swap_repo_id"];
 function hypervisorRow(row: Hypervisor) {
-  return [row.id, row.name, row.site, row.kind, row.address, row.port, row.transport, row.login, row.status, row.clusterName, row.switchName, row.storage, row.hostId, row.uri, row.detail];
+  return [row.id, row.name, row.site, row.kind, row.address, row.port, row.transport, row.login, row.status, row.clusterName, row.switchName, row.storage, row.hostId, row.uri, row.detail, row.configRepoId, row.diskRepoId, row.swapRepoId];
+}
+const REPO_DEPLOY_COLS = ["id", "name", "site", "kind", "protocol", "address", "path"];
+function deployRepoRow(row: DeployRepository) {
+  return [row.id, row.name, row.site, row.kind, row.protocol, row.address, row.path];
+}
+const IMAGE_COLS = ["id", "name", "site", "repository_id", "file", "format", "os", "firmware"];
+function deployImageRow(row: DeployImage) {
+  return [row.id, row.name, row.site, row.repositoryId, row.file, row.format, row.os, row.firmware];
+}
+const TEMPLATE_COLS = ["id", "name", "site", "image_id", "instance_kind", "vcpu", "memory_mb", "disk_gb"];
+function deployTemplateRow(row: DeployTemplate) {
+  return [row.id, row.name, row.site, row.imageId, row.instanceKind, row.vcpu, row.memoryMb, row.diskGb];
 }
 function workloadAppRow(row: WorkloadApp) {
   return [row.id, row.name, row.kind, row.serviceName, row.vmId || null, row.hostId || null, row.port, row.status];
@@ -372,6 +396,12 @@ function instanceFrom(row: Record<string, unknown>): Instance {
   if (row.connections != null) item.connections = Number(row.connections);
   item.hostId = row.host_id == null ? null : str(row.host_id);
   item.clusterName = row.cluster_name == null ? null : str(row.cluster_name);
+  item.hypervisorId = str(row.hypervisor_id);
+  item.templateId = str(row.template_id);
+  item.imageId = str(row.image_id);
+  item.configPath = str(row.config_path);
+  item.diskPath = str(row.disk_path);
+  item.swapPath = str(row.swap_path);
   return item;
 }
 function assetFrom(row: Record<string, unknown>): InventoryItem {
@@ -492,6 +522,48 @@ function hypervisorFrom(row: Record<string, unknown>): Hypervisor {
     hostId: str(row.host_id),
     uri: str(row.uri),
     detail: str(row.detail),
+    configRepoId: str(row.config_repo_id),
+    diskRepoId: str(row.disk_repo_id),
+    swapRepoId: str(row.swap_repo_id),
+  };
+}
+function deployRepoFrom(row: Record<string, unknown>): DeployRepository {
+  const kind = str(row.kind);
+  const protocol = str(row.protocol);
+  return {
+    id: str(row.id),
+    name: str(row.name),
+    site: str(row.site) as DeployRepository["site"],
+    kind: kind === "mapped" || kind === "nas" ? kind : "local",
+    protocol: protocol === "smb" || protocol === "nfs" ? protocol : "path",
+    address: str(row.address),
+    path: str(row.path),
+  };
+}
+function deployImageFrom(row: Record<string, unknown>): DeployImage {
+  const format = str(row.format);
+  return {
+    id: str(row.id),
+    name: str(row.name),
+    site: str(row.site) as DeployImage["site"],
+    repositoryId: str(row.repository_id),
+    file: str(row.file),
+    format: format === "vhdx" || format === "raw" || format === "iso" ? format : "qcow2",
+    os: str(row.os),
+    firmware: str(row.firmware) === "bios" ? "bios" : "uefi",
+  };
+}
+function deployTemplateFrom(row: Record<string, unknown>): DeployTemplate {
+  const kind = str(row.instance_kind);
+  return {
+    id: str(row.id),
+    name: str(row.name),
+    site: str(row.site) as DeployTemplate["site"],
+    imageId: str(row.image_id),
+    instanceKind: kind === "Database" || kind === "Load Balancer" || kind === "Backup" ? kind : "Compute",
+    vcpu: Number(row.vcpu),
+    memoryMb: Number(row.memory_mb),
+    diskGb: Number(row.disk_gb),
   };
 }
 function workloadAppFrom(row: Record<string, unknown>): WorkloadApp {

@@ -73,8 +73,34 @@ switch ($action) {
   }
   'deploy' {
     $bytes = $memory * 1MB
-    if ($computer) { New-VM -Name $name -ComputerName $computer -Generation 2 -MemoryStartupBytes $bytes | Start-VM }
-    else { New-VM -Name $name -Generation 2 -MemoryStartupBytes $bytes | Start-VM }
+    $switch = [string]$env:HV_SWITCH
+    $vmPath = [string]$env:HV_VMPATH
+    $disk = [string]$env:HV_DISK
+    $image = [string]$env:HV_IMAGE
+    $diskGb = 40
+    if ($env:HV_DISK_GB) { $diskGb = [int]$env:HV_DISK_GB }
+    $vhd = ''
+    if ($image -and $disk) {
+      if ($computer) { New-VHD -ComputerName $computer -Path $disk -ParentPath $image -Differencing | Out-Null }
+      else { New-VHD -Path $disk -ParentPath $image -Differencing | Out-Null }
+      $vhd = $disk
+    } elseif ($disk) {
+      if ($computer) { New-VHD -ComputerName $computer -Path $disk -SizeBytes ($diskGb * 1GB) -Dynamic | Out-Null }
+      else { New-VHD -Path $disk -SizeBytes ($diskGb * 1GB) -Dynamic | Out-Null }
+      $vhd = $disk
+    } elseif ($image) {
+      $vhd = $image
+    }
+    if ($computer) {
+      if ($switch -and $vmPath -and $vhd) { New-VM -Name $name -ComputerName $computer -Generation 2 -MemoryStartupBytes $bytes -SwitchName $switch -Path $vmPath -VHDPath $vhd | Start-VM }
+      elseif ($switch -and $vhd) { New-VM -Name $name -ComputerName $computer -Generation 2 -MemoryStartupBytes $bytes -SwitchName $switch -VHDPath $vhd | Start-VM }
+      elseif ($vhd) { New-VM -Name $name -ComputerName $computer -Generation 2 -MemoryStartupBytes $bytes -VHDPath $vhd | Start-VM }
+      else { New-VM -Name $name -ComputerName $computer -Generation 2 -MemoryStartupBytes $bytes | Start-VM }
+    } else {
+      if ($switch -and $vmPath -and $vhd) { New-VM -Name $name -Generation 2 -MemoryStartupBytes $bytes -SwitchName $switch -Path $vmPath -VHDPath $vhd | Start-VM }
+      elseif ($vhd) { New-VM -Name $name -Generation 2 -MemoryStartupBytes $bytes -VHDPath $vhd | Start-VM }
+      else { New-VM -Name $name -Generation 2 -MemoryStartupBytes $bytes | Start-VM }
+    }
   }
   default { throw 'Unknown action' }
 }
@@ -102,6 +128,11 @@ export async function runHyperv(input: {
   computer?: string;
   memoryMb?: number;
   ip?: string;
+  switchName?: string;
+  configPath?: string;
+  diskPath?: string;
+  imagePath?: string;
+  diskGb?: number;
 }): Promise<HypervResult> {
   const computer = (input.computer ?? "").trim();
   if (computer && !HOST_OK.test(computer)) {
@@ -132,6 +163,11 @@ export async function runHyperv(input: {
       HV_COMPUTER: computer,
       HV_MEMORY: String(input.memoryMb ?? 2048),
       HV_IP: input.ip ?? "",
+      HV_SWITCH: input.switchName ?? "",
+      HV_VMPATH: input.configPath ?? "",
+      HV_DISK: input.diskPath ?? "",
+      HV_IMAGE: input.imagePath ?? "",
+      HV_DISK_GB: String(input.diskGb ?? 40),
     }, input.action === "owner" ? 25000 : 20000);
     if (input.action === "owner") return parseOwner(output, input.ip ?? "");
     const target = computer ? ` on ${computer}` : "";

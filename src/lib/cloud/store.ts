@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { HYPERVISORS, cleanHypervisor, type Hypervisor } from "@/lib/cloud/hypervisor";
+import { DEPLOY_IMAGES, DEPLOY_REPOS, DEPLOY_TEMPLATES, pathOk, type DeployImage, type DeployRepository, type DeployTemplate } from "@/lib/cloud/deploy";
 import { refreshServices, type WorkloadSample } from "@/lib/cloud/uptime";
 import {
   ARRAYS,
@@ -112,6 +113,9 @@ type CloudState = {
   collectors: Collector[];
   hosts: PhysicalHost[];
   hypervisors: Hypervisor[];
+  deployRepos: DeployRepository[];
+  deployImages: DeployImage[];
+  deployTemplates: DeployTemplate[];
   workloadApps: WorkloadApp[];
   workloadDatabases: WorkloadDatabase[];
   workloadSamples: WorkloadSample[];
@@ -128,7 +132,7 @@ type CloudState = {
   setNavOpen: (open: boolean) => void;
   flash: (notice: string) => void;
   vmAction: (id: string, action: "stop" | "restart" | "shutdown") => void;
-  deployInstance: (input: { name: string; site: SiteKey; kind: Instance["kind"]; os: string }) => void;
+  deployInstance: (input: { name: string; site: SiteKey; kind: Instance["kind"]; os: string; hypervisorId: string; templateId: string; imageId: string; hostId: string | null; clusterName: string | null; configPath: string; diskPath: string; swapPath: string; started: boolean }) => void;
   addAsset: (input: AssetInput) => void;
   importAssets: (rows: ImportRow[]) => void;
   discoverIntoInventory: (cidr: string, live: Array<{ ip: string; ports: number[] }>) => void;
@@ -153,6 +157,14 @@ type CloudState = {
   deleteHost: (id: string) => void;
   saveHypervisor: (row: Hypervisor) => void;
   deleteHypervisor: (id: string) => void;
+  saveDeployRepo: (row: DeployRepository) => void;
+  deleteDeployRepo: (id: string) => void;
+  saveDeployImage: (row: DeployImage) => void;
+  deleteDeployImage: (id: string) => void;
+  saveDeployTemplate: (row: DeployTemplate) => void;
+  deleteDeployTemplate: (id: string) => void;
+  updateInstance: (id: string, input: { hypervisorId: string; templateId: string; imageId: string; hostId: string | null; clusterName: string | null; configPath: string; diskPath: string; swapPath: string }) => void;
+  deleteInstance: (id: string) => void;
   saveSwitch: (row: SanSwitch) => void;
   deleteSwitch: (name: string) => void;
   saveArray: (row: StorageArray) => void;
@@ -204,6 +216,9 @@ export const useCloud = create<CloudState>((set, get) => ({
   collectors: COLLECTORS,
   hosts: PHYSICAL_HOSTS,
   hypervisors: HYPERVISORS,
+  deployRepos: DEPLOY_REPOS,
+  deployImages: DEPLOY_IMAGES,
+  deployTemplates: DEPLOY_TEMPLATES,
   workloadApps: WORKLOAD_APPS,
   workloadDatabases: WORKLOAD_DATABASES,
   workloadSamples: [],
@@ -274,19 +289,49 @@ export const useCloud = create<CloudState>((set, get) => ({
       id: `vm-${Date.now()}`,
       name,
       site: input.site,
-      status: "running",
-      cpu: 8,
-      mem: 16,
-      ip: "10.0.0.0",
+      status: input.started ? "running" : "stopped",
+      cpu: 0,
+      mem: 0,
+      ip: "",
       kind: input.kind,
       os: input.os,
+      hypervisorId: input.hypervisorId,
+      templateId: input.templateId,
+      imageId: input.imageId,
+      hostId: input.hostId,
+      clusterName: input.clusterName,
+      configPath: input.configPath,
+      diskPath: input.diskPath,
+      swapPath: input.swapPath,
     };
     set({
       instances: [next, ...instances],
-      activity: [{ id: `a-${Date.now()}`, text: `Deployed ${name} on ${input.site}`, when: "now" }, ...activity].slice(0, 8),
+      activity: [{ id: `a-${Date.now()}`, text: `Deployed ${name} on ${input.site}${input.diskPath ? ` at ${input.diskPath}` : ""}`, when: "now" }, ...activity].slice(0, 8),
     });
-    flash(`Deployed ${name}.`);
+    flash(input.started ? `Deployed ${name}.` : `Recorded ${name}. The hypervisor did not start it.`);
     get().captureWorkloads();
+  },
+  updateInstance: (id, input) => {
+    const row = get().instances.find((item) => item.id === id);
+    if (!row || !allowSite(get, row.site)) return;
+    set({
+      instances: get().instances.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              hypervisorId: input.hypervisorId,
+              templateId: input.templateId,
+              imageId: input.imageId,
+              hostId: input.hostId,
+              clusterName: input.clusterName,
+              configPath: input.configPath,
+              diskPath: input.diskPath,
+              swapPath: input.swapPath,
+            }
+          : item,
+      ),
+    });
+    get().flash(`Updated ${row.name}. Files on the hypervisor were not moved.`);
   },
   addAsset: (input) => {
     const { role, inventory, ports, flash } = get();
@@ -591,6 +636,72 @@ export const useCloud = create<CloudState>((set, get) => ({
     if (!row || !allowSite(get, row.site)) return;
     set({ hypervisors: get().hypervisors.filter((item) => item.id !== id) });
     get().flash(`Deleted hypervisor ${row.name}.`);
+  },
+  saveDeployRepo: (row) => {
+    if (!allowSite(get, row.site)) return;
+    if (!pathOk(row.path) && row.kind !== "nas") {
+      get().flash("Path is not valid.");
+      return;
+    }
+    if (row.kind === "nas" && !row.address.trim()) {
+      get().flash("A NAS repository needs an address.");
+      return;
+    }
+    set({ deployRepos: upsert(get().deployRepos, { ...row, id: row.id.trim(), name: row.name.trim() || row.id.trim(), path: row.path.trim(), address: row.address.trim() }, "id") });
+    get().flash(`Saved repository ${row.name}.`);
+  },
+  deleteDeployRepo: (id) => {
+    const row = get().deployRepos.find((item) => item.id === id);
+    if (!row || !allowSite(get, row.site)) return;
+    if (get().deployImages.some((item) => item.repositoryId === id) || get().hypervisors.some((item) => item.configRepoId === id || item.diskRepoId === id || item.swapRepoId === id)) {
+      get().flash("That repository is still used by an image or a hypervisor.");
+      return;
+    }
+    set({ deployRepos: get().deployRepos.filter((item) => item.id !== id) });
+    get().flash(`Deleted repository ${row.name}.`);
+  },
+  saveDeployImage: (row) => {
+    if (!allowSite(get, row.site)) return;
+    if (!get().deployRepos.some((item) => item.id === row.repositoryId)) {
+      get().flash("Choose a repository for the image file.");
+      return;
+    }
+    set({ deployImages: upsert(get().deployImages, { ...row, id: row.id.trim(), name: row.name.trim() || row.id.trim(), file: row.file.trim() }, "id") });
+    get().flash(`Saved image ${row.name}.`);
+  },
+  deleteDeployImage: (id) => {
+    const row = get().deployImages.find((item) => item.id === id);
+    if (!row || !allowSite(get, row.site)) return;
+    if (get().deployTemplates.some((item) => item.imageId === id)) {
+      get().flash("That image is still used by a template.");
+      return;
+    }
+    set({ deployImages: get().deployImages.filter((item) => item.id !== id) });
+    get().flash(`Deleted image ${row.name}.`);
+  },
+  saveDeployTemplate: (row) => {
+    if (!allowSite(get, row.site)) return;
+    if (!get().deployImages.some((item) => item.id === row.imageId)) {
+      get().flash("Choose an image for the template.");
+      return;
+    }
+    const vcpu = Math.max(1, Math.min(128, Math.round(row.vcpu) || 1));
+    const memoryMb = Math.max(256, Math.min(1048576, Math.round(row.memoryMb) || 2048));
+    const diskGb = Math.max(1, Math.min(65536, Math.round(row.diskGb) || 40));
+    set({ deployTemplates: upsert(get().deployTemplates, { ...row, id: row.id.trim(), name: row.name.trim() || row.id.trim(), vcpu, memoryMb, diskGb }, "id") });
+    get().flash(`Saved template ${row.name}.`);
+  },
+  deleteDeployTemplate: (id) => {
+    const row = get().deployTemplates.find((item) => item.id === id);
+    if (!row || !allowSite(get, row.site)) return;
+    set({ deployTemplates: get().deployTemplates.filter((item) => item.id !== id) });
+    get().flash(`Deleted template ${row.name}.`);
+  },
+  deleteInstance: (id) => {
+    const row = get().instances.find((item) => item.id === id);
+    if (!row || !allowSite(get, row.site)) return;
+    set({ instances: get().instances.filter((item) => item.id !== id) });
+    get().flash(`Removed ${row.name} from the console. Disks on the hypervisor were not deleted.`);
   },
   saveSwitch: (row) => {
     if (!allowSite(get, row.site)) return;

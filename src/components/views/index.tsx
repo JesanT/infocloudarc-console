@@ -13,6 +13,7 @@ import {
   StorageView,
   UsersView,
 } from "@/components/views/platform";
+import { DeploymentView } from "@/components/views/deployment";
 import { HypervisorsView } from "@/components/views/hypervisors";
 import { InventoryView } from "@/components/views/inventory";
 import { ReportsView, RepositoryView, SubscriptionsView } from "@/components/views/admin";
@@ -74,6 +75,8 @@ export function View({ id }: { id: string }) {
       return <InventoryView />;
     case "hypervisors":
       return <HypervisorsView />;
+    case "deployment":
+      return <DeploymentView />;
     case "repository":
       return <RepositoryView />;
     case "subscriptions":

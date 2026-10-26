@@ -150,6 +150,7 @@ const NAV: NavNode[] = [
     icon: Boxes,
     items: [
       { id: "hypervisors", label: "Hypervisors", icon: Server },
+      { id: "deployment", label: "Deployment", icon: HardDrive },
       { id: "inventory", label: "Inventory", icon: Boxes },
       { id: "repository", label: "Repository", icon: Archive },
       { id: "subscriptions", label: "Subscriptions", icon: Receipt },

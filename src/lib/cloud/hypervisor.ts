@@ -17,6 +17,9 @@ export type Hypervisor = {
   clusterName: string;
   switchName: string;
   storage: string;
+  configRepoId: string;
+  diskRepoId: string;
+  swapRepoId: string;
   hostId: string;
   uri: string;
   detail: string;
@@ -36,6 +39,9 @@ export const HYPERVISORS: Hypervisor[] = [
     clusterName: "east-compute",
     switchName: "External",
     storage: "C:/Hyper-V",
+    configRepoId: "repo-east-config",
+    diskRepoId: "repo-east-disk",
+    swapRepoId: "repo-east-swap",
     hostId: "ph-east-01",
     uri: "",
     detail: "Recorded with the compute host. The console has not checked WinRM yet.",
@@ -53,6 +59,9 @@ export const HYPERVISORS: Hypervisor[] = [
     clusterName: "west-compute",
     switchName: "External",
     storage: "C:/Hyper-V",
+    configRepoId: "",
+    diskRepoId: "repo-west-disk",
+    swapRepoId: "",
     hostId: "ph-west-01",
     uri: "",
     detail: "Recorded with the compute host. The console has not checked WinRM yet.",
@@ -70,6 +79,9 @@ export const HYPERVISORS: Hypervisor[] = [
     clusterName: "central-dr",
     switchName: "External",
     storage: "C:/Hyper-V",
+    configRepoId: "repo-central-nas",
+    diskRepoId: "repo-central-nas",
+    swapRepoId: "repo-central-nas",
     hostId: "ph-central-01",
     uri: "",
     detail: "Recorded with the compute host. The console has not checked WinRM yet.",
@@ -118,6 +130,9 @@ export function cleanHypervisor(row: Hypervisor): Hypervisor {
     clusterName: row.clusterName.trim(),
     switchName: row.switchName.trim(),
     storage: row.storage.trim(),
+    configRepoId: row.configRepoId.trim(),
+    diskRepoId: row.diskRepoId.trim(),
+    swapRepoId: row.swapRepoId.trim(),
     hostId: row.hostId.trim(),
     uri: row.uri.trim(),
     detail: row.detail.trim(),
