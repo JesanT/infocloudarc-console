@@ -270,7 +270,7 @@ export function activityVisible(text: string, role: Role, filter: SiteFilter): b
 
 export function tone(status: string): "ok" | "warn" | "danger" | "info" {
   if (["running", "Healthy", "Online", "Active", "Success"].includes(status)) return "ok";
-  if (["Warning", "Degraded", "Trial", "Expiring", "Syncing"].includes(status)) return "warn";
+  if (["Warning", "Degraded", "Trial", "Expiring", "Syncing", "Running"].includes(status)) return "warn";
   if (["stopped", "Failed", "Offline", "Critical"].includes(status)) return "danger";
   return "info";
 }

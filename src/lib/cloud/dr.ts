@@ -73,14 +73,17 @@ export type DrDatabase = {
   status: Health;
 };
 
+export type DrStepState = "pending" | "running" | "done" | "failed";
+
 export type DrWorkflow = {
   id: string;
   serviceId: string;
   name: string;
   mode: FailoverMode;
   steps: string[];
+  stepState: DrStepState[];
   lastRun: string;
-  status: "Ready" | "Success" | "Failed";
+  status: "Ready" | "Running" | "Success" | "Failed";
 };
 
 export type DrPerf = { id: string; target: string; kind: string; metric: string; value: string; at: string };
@@ -185,6 +188,7 @@ const WORKFLOWS: DrWorkflow[] = SERVICES.map((service) => ({
   name: `${service.name} failover`,
   mode: service.mode,
   steps: ["Quiesce writes", "Promote standby database", "Start application on standby host", "Move service address", "Verify health"],
+  stepState: [],
   lastRun: service.id === "svc-billing" ? "6 h ago" : "Not run",
   status: "Ready" as const,
 }));
@@ -228,15 +232,38 @@ type DrState = {
   audit: DrAudit[];
   setMode: (serviceId: string, mode: FailoverMode) => void;
   runFailover: (serviceId: string, trigger: FailoverMode) => void;
+  advanceRun: (serviceId: string) => void;
+  resumeRuns: () => void;
 };
 
 function nowLabel() {
   return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+const runTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearRun(serviceId: string) {
+  const timer = runTimers.get(serviceId);
+  if (timer) clearTimeout(timer);
+  runTimers.delete(serviceId);
+}
+
+function scheduleRun(serviceId: string) {
+  clearRun(serviceId);
+  runTimers.set(
+    serviceId,
+    setTimeout(() => useDr.getState().advanceRun(serviceId), 900),
+  );
+}
+
 function allowed(service: DrService): boolean {
   const { role, site } = useCloud.getState();
   return canMutateSite(role, site, service.site);
+}
+
+function statesFor(flow: DrWorkflow): DrStepState[] {
+  if (flow.stepState?.length === flow.steps.length) return [...flow.stepState];
+  return flow.steps.map(() => "pending");
 }
 
 export const useDr = create<DrState>((set, get) => ({
@@ -259,6 +286,10 @@ export const useDr = create<DrState>((set, get) => ({
       cloud.flash(`Site access can change failover only for ${siteLabel(cloud.site === "all" ? "east" : cloud.site)} services.`);
       return;
     }
+    if (get().workflows.some((item) => item.serviceId === serviceId && item.status === "Running")) {
+      cloud.flash("Wait for the workflow to finish before changing the mode.");
+      return;
+    }
     const at = nowLabel();
     set({
       services: get().services.map((item) => (item.id === serviceId ? { ...item, mode } : item)),
@@ -269,10 +300,15 @@ export const useDr = create<DrState>((set, get) => ({
   },
   runFailover: (serviceId, trigger) => {
     const service = get().services.find((item) => item.id === serviceId);
-    if (!service) return;
+    const flow = get().workflows.find((item) => item.serviceId === serviceId);
+    if (!service || !flow) return;
     const cloud = useCloud.getState();
     if (!allowed(service)) {
       cloud.flash(`Site access can fail over only ${siteLabel(cloud.site === "all" ? "east" : cloud.site)} services.`);
+      return;
+    }
+    if (flow.status === "Running") {
+      cloud.flash(`${service.name} already has a workflow running.`);
       return;
     }
     if (trigger === "auto" && service.mode !== "auto") {
@@ -284,16 +320,65 @@ export const useDr = create<DrState>((set, get) => ({
       return;
     }
     const at = nowLabel();
+    const stepState = flow.steps.map((_, index) => (index === 0 ? "running" : "pending")) as DrStepState[];
+    set({
+      workflows: get().workflows.map((item) => (item.serviceId === serviceId ? { ...item, status: "Running", stepState, lastRun: "In progress" } : item)),
+      events: [{ id: `ev-${Date.now()}`, target: service.name, message: `Started ${trigger === "auto" ? "automated" : "manual"} workflow`, at, severity: "Info" as const }, ...get().events].slice(0, 20),
+      audit: [{ id: `au-${Date.now()}`, actor: ROLE_LABEL[cloud.role], action: "Started workflow", target: `${service.name}: ${flow.steps[0]}`, at }, ...get().audit].slice(0, 40),
+    });
+    cloud.flash(`${service.name} workflow started.`);
+    scheduleRun(serviceId);
+  },
+  advanceRun: (serviceId) => {
+    clearRun(serviceId);
+    const service = get().services.find((item) => item.id === serviceId);
+    const flow = get().workflows.find((item) => item.serviceId === serviceId);
+    if (!service || !flow || flow.status !== "Running") return;
+    const cloud = useCloud.getState();
+    const at = nowLabel();
+    const states = statesFor(flow);
+    const current = states.findIndex((item) => item === "running");
+    if (current < 0) return;
+    const step = flow.steps[current] ?? "Step";
+    const fail = service.status === "Warning" && step === "Verify health";
+    if (fail) {
+      states[current] = "failed";
+      set({
+        workflows: get().workflows.map((item) => (item.serviceId === serviceId ? { ...item, status: "Failed", stepState: states, lastRun: "Failed" } : item)),
+        events: [{ id: `ev-${Date.now()}`, target: service.name, message: `${step} failed. Active site was not moved.`, at, severity: "Critical" as const }, ...get().events].slice(0, 20),
+        alerts: [{ id: `al-${Date.now()}`, target: service.name, message: `Workflow stopped on ${step}.`, severity: "Critical" as const, state: "Open" as const }, ...get().alerts].slice(0, 20),
+        audit: [{ id: `au-${Date.now()}`, actor: ROLE_LABEL[cloud.role], action: "Workflow failed", target: `${service.name}: ${step}`, at }, ...get().audit].slice(0, 40),
+      });
+      cloud.flash(`${service.name} stopped on ${step}. The active site did not change.`);
+      return;
+    }
+    states[current] = "done";
+    const next = current + 1;
+    if (next < flow.steps.length) {
+      states[next] = "running";
+      set({
+        workflows: get().workflows.map((item) => (item.serviceId === serviceId ? { ...item, stepState: states } : item)),
+        audit: [{ id: `au-${Date.now()}`, actor: ROLE_LABEL[cloud.role], action: `Step ${current + 1} done`, target: `${service.name}: ${step}`, at }, ...get().audit].slice(0, 40),
+      });
+      scheduleRun(serviceId);
+      return;
+    }
     const from = service.site;
     const to = service.standbySite;
+    const trigger = service.mode;
     set({
       services: get().services.map((item) => (item.id === serviceId ? { ...item, site: to, standbySite: from, status: "Healthy" } : item)),
-      workflows: get().workflows.map((item) => (item.serviceId === serviceId ? { ...item, lastRun: "Just now", status: "Success" } : item)),
+      workflows: get().workflows.map((item) => (item.serviceId === serviceId ? { ...item, status: "Success", stepState: states, lastRun: "Just now" } : item)),
       events: [{ id: `ev-${Date.now()}`, target: service.name, message: `${trigger === "auto" ? "Automated" : "Manual"} failover ${from} to ${to}`, at, severity: "Info" as const }, ...get().events].slice(0, 20),
       alerts: [{ id: `al-${Date.now()}`, target: service.name, message: `Failover completed. Verify ${to} health.`, severity: "Warning" as const, state: "Open" as const }, ...get().alerts].slice(0, 20),
-      audit: [{ id: `au-${Date.now()}`, actor: ROLE_LABEL[cloud.role], action: `${trigger === "auto" ? "Automated" : "Manual"} failover`, target: `${service.name} ${from} → ${to}`, at }, ...get().audit].slice(0, 20),
+      audit: [{ id: `au-${Date.now()}`, actor: ROLE_LABEL[cloud.role], action: `${trigger === "auto" ? "Automated" : "Manual"} failover`, target: `${service.name} ${from} → ${to}`, at }, ...get().audit].slice(0, 40),
       performance: [{ id: `pf-${Date.now()}`, target: service.name, kind: "service", metric: "Failover", value: trigger === "auto" ? "38 s" : "2 min", at }, ...get().performance].slice(0, 24),
     });
-    cloud.flash(`${service.name} failed over from ${from} to ${to}.`);
+    cloud.flash(`${service.name} failed over from ${siteLabel(from)} to ${siteLabel(to)}.`);
+  },
+  resumeRuns: () => {
+    for (const flow of get().workflows) {
+      if (flow.status === "Running") scheduleRun(flow.serviceId);
+    }
   },
 }));

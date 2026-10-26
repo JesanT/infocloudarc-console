@@ -91,6 +91,7 @@ function snapshot(): ConsolePayload {
 function apply(payload: ConsolePayload) {
   useCloud.setState(payload.cloud as object);
   useDr.setState(payload.dr as object);
+  useDr.getState().resumeRuns();
 }
 
 export function useConsolePersistence() {

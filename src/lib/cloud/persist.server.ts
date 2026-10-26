@@ -232,7 +232,7 @@ const DR_CLUSTER_COLS = ["id", "name", "site", "kind", "nodes", "status"];
 const DR_VM_COLS = ["id", "name", "host_id", "cluster_id", "site", "status", "cpu", "mem", "ip"];
 const DR_APP_COLS = ["id", "name", "kind", "service_id", "vm_id", "port", "status"];
 const DR_DB_COLS = ["id", "name", "engine", "service_id", "vm_id", "replica", "status"];
-const DR_WF_COLS = ["id", "service_id", "name", "mode", "steps", "last_run", "status"];
+const DR_WF_COLS = ["id", "service_id", "name", "mode", "steps", "last_run", "status", "step_state"];
 const PERF_COLS = ["id", "target", "kind", "metric", "value", "at"];
 const DR_EVENT_COLS = ["id", "target", "message", "at", "severity"];
 const DR_ALERT_COLS = ["id", "target", "message", "severity", "state"];
@@ -323,7 +323,7 @@ function drDbRow(row: DrDatabase) {
   return [row.id, row.name, row.engine, row.serviceId, row.vmId, row.replica, row.status];
 }
 function drWfRow(row: DrWorkflow) {
-  return [row.id, row.serviceId, row.name, row.mode, JSON.stringify(row.steps ?? []), row.lastRun, row.status];
+  return [row.id, row.serviceId, row.name, row.mode, JSON.stringify(row.steps ?? []), row.lastRun, row.status, JSON.stringify(row.stepState ?? [])];
 }
 function perfRow(row: DrPerf) {
   return [row.id, row.target, row.kind, row.metric, row.value, row.at];
@@ -480,7 +480,7 @@ function drDbFrom(row: Record<string, unknown>): DrDatabase {
   return { id: str(row.id), name: str(row.name), engine: str(row.engine) as DrDatabase["engine"], serviceId: str(row.service_id), vmId: str(row.vm_id), replica: str(row.replica), status: str(row.status) as DrDatabase["status"] };
 }
 function drWfFrom(row: Record<string, unknown>): DrWorkflow {
-  return { id: str(row.id), serviceId: str(row.service_id), name: str(row.name), mode: str(row.mode) as DrWorkflow["mode"], steps: asJson<string[]>(row.steps, []), lastRun: str(row.last_run), status: str(row.status) as DrWorkflow["status"] };
+  return { id: str(row.id), serviceId: str(row.service_id), name: str(row.name), mode: str(row.mode) as DrWorkflow["mode"], steps: asJson<string[]>(row.steps, []), stepState: asJson<DrWorkflow["stepState"]>(row.step_state, []), lastRun: str(row.last_run), status: str(row.status) as DrWorkflow["status"] };
 }
 function perfFrom(row: Record<string, unknown>): DrPerf {
   return { id: str(row.id), target: str(row.target), kind: str(row.kind), metric: str(row.metric), value: str(row.value), at: str(row.at) };
@@ -531,7 +531,7 @@ async function writeSettings(sql: Sql, cloud: CloudSnap) {
 async function replaceRows(sql: Sql, table: string, columns: string[], rows: unknown[][]) {
   await sql.query(`delete from ${table}`);
   if (columns.length === 0 || rows.length === 0) return;
-  const jsonAt = new Set(columns.map((name, index) => (name === "steps" || name === "extra_subnets" ? index : -1)).filter((index) => index >= 0));
+  const jsonAt = new Set(columns.map((name, index) => (name === "steps" || name === "step_state" || name === "extra_subnets" ? index : -1)).filter((index) => index >= 0));
   for (const row of rows) {
     const marks = columns.map((_, index) => (jsonAt.has(index) ? `$${index + 1}::jsonb` : `$${index + 1}`));
     await sql.query(`insert into ${table} (${columns.join(", ")}) values (${marks.join(", ")})`, row);

@@ -114,8 +114,16 @@ export function ServiceDrView({ focus }: { focus: Focus }) {
                   <Td><StatusPill value={service.status} /></Td>
                   <Td>
                     {canMutateSite(role, site, service.site) ? (
-                      <Button variant="primary" onClick={() => runFailover(service.id, service.mode)}>
-                        {service.mode === "auto" ? "Run workflow" : "Fail over"}
+                      <Button
+                        variant="primary"
+                        disabled={workflows.some((item) => item.serviceId === service.id && item.status === "Running")}
+                        onClick={() => runFailover(service.id, service.mode)}
+                      >
+                        {workflows.some((item) => item.serviceId === service.id && item.status === "Running")
+                          ? "Running"
+                          : service.mode === "auto"
+                            ? "Run workflow"
+                            : "Fail over"}
                       </Button>
                     ) : (
                       "View only"
@@ -151,7 +159,7 @@ export function ServiceDrView({ focus }: { focus: Focus }) {
         </Panel>
       </div>
 
-      <Panel title="Workflows" subtitle="Same steps for automated and manual failover. Automated stays armed until you switch the service to manual.">
+      <Panel title="Workflows" subtitle="Automated and manual failover use the same steps. Each step is recorded. A service already in warning fails the health check and stays on the active site.">
         <TableWrap>
           <Table>
             <thead>
@@ -162,7 +170,23 @@ export function ServiceDrView({ focus }: { focus: Focus }) {
                 <tr key={flow.id}>
                   <Td>{flow.name}</Td>
                   <Td>{flow.mode === "auto" ? "Automated" : "Manual"}</Td>
-                  <Td>{flow.steps.join(" → ")}</Td>
+                  <Td>
+                    <ol className="space-y-1">
+                      {flow.steps.map((step, index) => {
+                        const state = flow.stepState?.[index] ?? "pending";
+                        return (
+                          <li key={step} className="flex items-center justify-between gap-3">
+                            <span>{index + 1}. {step}</span>
+                            {state === "pending" ? (
+                              <span className="text-xs text-faint">Waiting</span>
+                            ) : (
+                              <StatusPill value={state === "done" ? "Success" : state === "running" ? "Running" : "Failed"} />
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </Td>
                   <Td>{flow.lastRun}</Td>
                   <Td><StatusPill value={flow.status === "Ready" ? "Active" : flow.status} /></Td>
                 </tr>
