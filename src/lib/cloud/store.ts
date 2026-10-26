@@ -7,6 +7,7 @@ import {
   COLLECTORS,
   INVENTORY,
   INSTANCES,
+  PHYSICAL_HOSTS,
   POLICIES,
   REPORTS,
   REPOS,
@@ -16,6 +17,8 @@ import {
   SUBSCRIPTIONS,
   SWITCHES,
   USERS,
+  WORKLOAD_APPS,
+  WORKLOAD_DATABASES,
   completeAsset,
   type Activity,
   type BackupJob,
@@ -31,6 +34,9 @@ import {
   type NetEvent,
   type NetPort,
   type Operator,
+  type PhysicalHost,
+  type WorkloadApp,
+  type WorkloadDatabase,
   type ReportDef,
   type RestorePoint,
   type Role,
@@ -99,6 +105,9 @@ type CloudState = {
   restorePoints: RestorePoint[];
   policies: BackupPolicy[];
   collectors: Collector[];
+  hosts: PhysicalHost[];
+  workloadApps: WorkloadApp[];
+  workloadDatabases: WorkloadDatabase[];
   snmp: SnmpConfig;
   appSubnet: string;
   appAddress: string;
@@ -123,6 +132,30 @@ type CloudState = {
   acknowledgePort: (id: string) => void;
   syncRepo: (id: string) => void;
   renewSubscription: (id: string) => void;
+  saveService: (row: ComputeService) => void;
+  deleteService: (name: string) => void;
+  saveWorkloadApp: (row: WorkloadApp) => void;
+  deleteWorkloadApp: (id: string) => void;
+  saveWorkloadDatabase: (row: WorkloadDatabase) => void;
+  deleteWorkloadDatabase: (id: string) => void;
+  saveCluster: (row: ComputeCluster) => void;
+  deleteCluster: (name: string) => void;
+  saveHost: (row: PhysicalHost) => void;
+  deleteHost: (id: string) => void;
+  saveSwitch: (row: SanSwitch) => void;
+  deleteSwitch: (name: string) => void;
+  saveArray: (row: StorageArray) => void;
+  deleteArray: (name: string) => void;
+  saveBackup: (row: BackupJob) => void;
+  deleteBackup: (id: string) => void;
+  saveBackupTarget: (row: BackupTarget) => void;
+  deleteBackupTarget: (id: string) => void;
+  savePolicy: (row: BackupPolicy) => void;
+  deletePolicy: (id: string) => void;
+  saveRestorePoint: (row: RestorePoint) => void;
+  deleteRestorePoint: (id: string) => void;
+  saveOperator: (row: Operator) => void;
+  deleteOperator: (name: string) => void;
 };
 
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -158,6 +191,9 @@ export const useCloud = create<CloudState>((set, get) => ({
   restorePoints: RESTORE_POINTS,
   policies: POLICIES,
   collectors: COLLECTORS,
+  hosts: PHYSICAL_HOSTS,
+  workloadApps: WORKLOAD_APPS,
+  workloadDatabases: WORKLOAD_DATABASES,
   snmp: DEFAULT_SNMP,
   appSubnet: "",
   appAddress: "",
@@ -371,7 +407,202 @@ export const useCloud = create<CloudState>((set, get) => ({
     });
     flash(`Renewed ${sub.module}.`);
   },
+  saveService: (row) => {
+    if (!allowSite(get, row.site)) return;
+    const apps = get().workloadApps.filter((item) => item.serviceName === row.name);
+    const databases = get().workloadDatabases.filter((item) => item.serviceName === row.name);
+    const linked = new Set([...apps.map((item) => item.vmId), ...databases.map((item) => item.vmId)].filter(Boolean));
+    set({
+      services: upsert(get().services, { ...row, instances: Math.max(row.instances, linked.size) }, "name"),
+    });
+    get().flash(`Saved service ${row.name}.`);
+  },
+  deleteService: (name) => {
+    const row = get().services.find((item) => item.name === name);
+    if (!row || !allowSite(get, row.site)) return;
+    set({
+      services: get().services.filter((item) => item.name !== name),
+      workloadApps: get().workloadApps.filter((item) => item.serviceName !== name),
+      workloadDatabases: get().workloadDatabases.filter((item) => item.serviceName !== name),
+    });
+    get().flash(`Deleted service ${name}.`);
+  },
+  saveWorkloadApp: (row) => {
+    const service = get().services.find((item) => item.name === row.serviceName);
+    if (!service || !allowSite(get, service.site)) return;
+    if (!row.vmId && !row.hostId) {
+      get().flash("An application needs a virtual machine or a physical host.");
+      return;
+    }
+    set({ workloadApps: upsert(get().workloadApps, row, "id") });
+    get().flash(`Saved application ${row.name}.`);
+  },
+  deleteWorkloadApp: (id) => {
+    const row = get().workloadApps.find((item) => item.id === id);
+    const service = row && get().services.find((item) => item.name === row.serviceName);
+    if (!row || !service || !allowSite(get, service.site)) return;
+    set({ workloadApps: get().workloadApps.filter((item) => item.id !== id) });
+    get().flash(`Deleted application ${row.name}.`);
+  },
+  saveWorkloadDatabase: (row) => {
+    const service = get().services.find((item) => item.name === row.serviceName);
+    if (!service || !allowSite(get, service.site)) return;
+    if (!row.vmId && !row.hostId) {
+      get().flash("A database needs a virtual machine or a physical host.");
+      return;
+    }
+    set({ workloadDatabases: upsert(get().workloadDatabases, row, "id") });
+    get().flash(`Saved database ${row.name}.`);
+  },
+  deleteWorkloadDatabase: (id) => {
+    const row = get().workloadDatabases.find((item) => item.id === id);
+    const service = row && get().services.find((item) => item.name === row.serviceName);
+    if (!row || !service || !allowSite(get, service.site)) return;
+    set({ workloadDatabases: get().workloadDatabases.filter((item) => item.id !== id) });
+    get().flash(`Deleted database ${row.name}.`);
+  },
+  saveCluster: (row) => {
+    if (!allowSite(get, row.site)) return;
+    set({ clusters: upsert(get().clusters, row, "name") });
+    get().flash(`Saved cluster ${row.name}.`);
+  },
+  deleteCluster: (name) => {
+    const row = get().clusters.find((item) => item.name === name);
+    if (!row || !allowSite(get, row.site)) return;
+    set({
+      clusters: get().clusters.filter((item) => item.name !== name),
+      hosts: get().hosts.map((item) => (item.clusterName === name ? { ...item, clusterName: null } : item)),
+      instances: get().instances.map((item) => (item.clusterName === name ? { ...item, clusterName: null } : item)),
+    });
+    get().flash(`Deleted cluster ${name}.`);
+  },
+  saveHost: (row) => {
+    if (!allowSite(get, row.site)) return;
+    set({ hosts: upsert(get().hosts, row, "id") });
+    get().flash(`Saved host ${row.name}.`);
+  },
+  deleteHost: (id) => {
+    const row = get().hosts.find((item) => item.id === id);
+    if (!row || !allowSite(get, row.site)) return;
+    const clear = <T extends { hostId: string | null; vmId: string | null }>(rows: T[]) =>
+      rows.flatMap((item) => {
+        if (item.hostId !== id) return [item];
+        if (item.vmId) return [{ ...item, hostId: null }];
+        return [];
+      });
+    set({
+      hosts: get().hosts.filter((item) => item.id !== id),
+      instances: get().instances.map((item) => (item.hostId === id ? { ...item, hostId: null } : item)),
+      workloadApps: clear(get().workloadApps),
+      workloadDatabases: clear(get().workloadDatabases),
+    });
+    get().flash(`Deleted host ${row.name}.`);
+  },
+  saveSwitch: (row) => {
+    if (!allowSite(get, row.site)) return;
+    set({ switches: upsert(get().switches, row, "name") });
+    get().flash(`Saved SAN switch ${row.name}.`);
+  },
+  deleteSwitch: (name) => {
+    const row = get().switches.find((item) => item.name === name);
+    if (!row || !allowSite(get, row.site)) return;
+    set({ switches: get().switches.filter((item) => item.name !== name) });
+    get().flash(`Deleted SAN switch ${name}.`);
+  },
+  saveArray: (row) => {
+    if (!allowSite(get, row.site)) return;
+    set({ arrays: upsert(get().arrays, row, "name") });
+    get().flash(`Saved array ${row.name}.`);
+  },
+  deleteArray: (name) => {
+    const row = get().arrays.find((item) => item.name === name);
+    if (!row || !allowSite(get, row.site)) return;
+    set({ arrays: get().arrays.filter((item) => item.name !== name) });
+    get().flash(`Deleted array ${name}.`);
+  },
+  saveBackup: (row) => {
+    if (!allowSite(get, row.site)) return;
+    set({ backups: upsert(get().backups, row, "id") });
+    get().flash(`Saved backup job ${row.job}.`);
+  },
+  deleteBackup: (id) => {
+    const row = get().backups.find((item) => item.id === id);
+    if (!row || !allowSite(get, row.site)) return;
+    set({ backups: get().backups.filter((item) => item.id !== id) });
+    get().flash(`Deleted backup job ${row.job}.`);
+  },
+  saveBackupTarget: (row) => {
+    if (!allowSite(get, row.site)) return;
+    set({ backupTargets: upsert(get().backupTargets, row, "id") });
+    get().flash(`Saved repository ${row.name}.`);
+  },
+  deleteBackupTarget: (id) => {
+    const row = get().backupTargets.find((item) => item.id === id);
+    if (!row || !allowSite(get, row.site)) return;
+    set({ backupTargets: get().backupTargets.filter((item) => item.id !== id) });
+    get().flash(`Deleted repository ${row.name}.`);
+  },
+  savePolicy: (row) => {
+    if (get().role === "site") {
+      get().flash("Site access cannot change backup policies.");
+      return;
+    }
+    set({ policies: upsert(get().policies, row, "id") });
+    get().flash(`Saved policy ${row.name}.`);
+  },
+  deletePolicy: (id) => {
+    if (get().role === "site") {
+      get().flash("Site access cannot change backup policies.");
+      return;
+    }
+    const row = get().policies.find((item) => item.id === id);
+    if (!row) return;
+    set({ policies: get().policies.filter((item) => item.id !== id) });
+    get().flash(`Deleted policy ${row.name}.`);
+  },
+  saveRestorePoint: (row) => {
+    if (!allowSite(get, row.site)) return;
+    set({ restorePoints: upsert(get().restorePoints, row, "id") });
+    get().flash(`Saved restore point ${row.workload}.`);
+  },
+  deleteRestorePoint: (id) => {
+    const row = get().restorePoints.find((item) => item.id === id);
+    if (!row || !allowSite(get, row.site)) return;
+    set({ restorePoints: get().restorePoints.filter((item) => item.id !== id) });
+    get().flash(`Deleted restore point ${row.workload}.`);
+  },
+  saveOperator: (row) => {
+    if (get().role === "site") {
+      get().flash("Site access cannot change operators.");
+      return;
+    }
+    set({ operators: upsert(get().operators, row, "name") });
+    get().flash(`Saved operator ${row.name}.`);
+  },
+  deleteOperator: (name) => {
+    if (get().role === "site") {
+      get().flash("Site access cannot change operators.");
+      return;
+    }
+    set({ operators: get().operators.filter((item) => item.name !== name) });
+    get().flash(`Deleted operator ${name}.`);
+  },
 }));
+
+function allowSite(get: () => CloudState, site: SiteKey): boolean {
+  const { role, flash } = get();
+  if (role === "site" && site !== "east") {
+    flash("Site access can change Site-East only.");
+    return false;
+  }
+  return true;
+}
+
+function upsert<T>(rows: T[], row: T, key: keyof T): T[] {
+  const index = rows.findIndex((item) => item[key] === row[key]);
+  if (index < 0) return [...rows, row];
+  return rows.map((item, itemIndex) => (itemIndex === index ? row : item));
+}
 
 function siteForCidr(cidr: string): SiteKey {
   if (cidr.startsWith("10.20.")) return "west";

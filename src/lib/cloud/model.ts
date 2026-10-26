@@ -38,7 +38,58 @@ export type Instance = {
   inMbps?: number;
   outMbps?: number;
   connections?: number;
+  hostId?: string | null;
+  clusterName?: string | null;
 };
+
+export type PhysicalHost = {
+  id: string;
+  name: string;
+  site: SiteKey;
+  clusterName: string | null;
+  status: "Online" | "Degraded" | "Offline";
+  cpu: number;
+  mem: number;
+  ip: string;
+};
+
+export type WorkloadApp = {
+  id: string;
+  name: string;
+  kind: string;
+  serviceName: string;
+  vmId: string | null;
+  hostId: string | null;
+  port: number;
+  status: "Healthy" | "Degraded" | "Offline";
+};
+
+export type WorkloadDatabase = {
+  id: string;
+  name: string;
+  engine: string;
+  serviceName: string;
+  vmId: string | null;
+  hostId: string | null;
+  status: "Healthy" | "Degraded" | "Offline";
+};
+
+export const PHYSICAL_HOSTS: PhysicalHost[] = [
+  { id: "ph-east-01", name: "ph-east-01", site: "east", clusterName: "east-compute", status: "Online", cpu: 38, mem: 54, ip: "10.10.1.11" },
+  { id: "ph-west-01", name: "ph-west-01", site: "west", clusterName: "west-compute", status: "Online", cpu: 22, mem: 41, ip: "10.20.2.11" },
+  { id: "ph-central-01", name: "ph-central-01", site: "central", clusterName: "central-dr", status: "Online", cpu: 19, mem: 33, ip: "10.30.1.11" },
+];
+
+export const WORKLOAD_APPS: WorkloadApp[] = [
+  { id: "app-api-web", name: "app-api-web", kind: "tomcat", serviceName: "app-api", vmId: "vm-001", hostId: "ph-east-01", port: 8080, status: "Healthy" },
+  { id: "edge-proxy", name: "edge-proxy", kind: "other", serviceName: "edge-gateway", vmId: "vm-004", hostId: "ph-east-01", port: 443, status: "Healthy" },
+  { id: "metrics-agent", name: "metrics-agent", kind: "other", serviceName: "metrics", vmId: null, hostId: "ph-west-01", port: 9100, status: "Degraded" },
+];
+
+export const WORKLOAD_DATABASES: WorkloadDatabase[] = [
+  { id: "app-api-db", name: "app-api-db", engine: "postgresql", serviceName: "app-api", vmId: "vm-002", hostId: "ph-east-01", status: "Healthy" },
+  { id: "identity-db", name: "identity-db", engine: "postgresql", serviceName: "identity", vmId: null, hostId: "ph-central-01", status: "Healthy" },
+];
 
 export type InventoryItem = {
   id: string;
@@ -177,12 +228,12 @@ export function tone(status: string): "ok" | "warn" | "danger" | "info" {
 }
 
 export const INSTANCES: Instance[] = [
-  { id: "vm-001", name: "web-prod-01", site: "east", status: "running", cpu: 45, mem: 62, ip: "10.10.1.21", kind: "Compute", os: "Ubuntu 22.04" },
-  { id: "vm-002", name: "db-primary", site: "east", status: "running", cpu: 78, mem: 85, ip: "10.10.1.50", kind: "Database", os: "RHEL 9" },
-  { id: "vm-003", name: "app-worker-02", site: "west", status: "stopped", cpu: 0, mem: 0, ip: "10.20.2.15", kind: "Compute", os: "Ubuntu 22.04" },
-  { id: "vm-004", name: "lb-frontend", site: "east", status: "running", cpu: 22, mem: 35, ip: "10.10.1.10", kind: "Load Balancer", os: "HAProxy", inMbps: 640, outMbps: 610, connections: 1840 },
-  { id: "vm-005", name: "backup-proxy", site: "central", status: "running", cpu: 15, mem: 40, ip: "10.30.1.100", kind: "Backup", os: "Ubuntu 22.04" },
-  { id: "vm-006", name: "db-replica", site: "west", status: "running", cpu: 41, mem: 58, ip: "10.20.2.50", kind: "Database", os: "RHEL 9" },
+  { id: "vm-001", name: "web-prod-01", site: "east", status: "running", cpu: 45, mem: 62, ip: "10.10.1.21", kind: "Compute", os: "Ubuntu 22.04", hostId: "ph-east-01", clusterName: "east-compute" },
+  { id: "vm-002", name: "db-primary", site: "east", status: "running", cpu: 78, mem: 85, ip: "10.10.1.50", kind: "Database", os: "RHEL 9", hostId: "ph-east-01", clusterName: "east-compute" },
+  { id: "vm-003", name: "app-worker-02", site: "west", status: "stopped", cpu: 0, mem: 0, ip: "10.20.2.15", kind: "Compute", os: "Ubuntu 22.04", hostId: "ph-west-01", clusterName: "west-compute" },
+  { id: "vm-004", name: "lb-frontend", site: "east", status: "running", cpu: 22, mem: 35, ip: "10.10.1.10", kind: "Load Balancer", os: "HAProxy", inMbps: 640, outMbps: 610, connections: 1840, hostId: "ph-east-01", clusterName: "east-compute" },
+  { id: "vm-005", name: "backup-proxy", site: "central", status: "running", cpu: 15, mem: 40, ip: "10.30.1.100", kind: "Backup", os: "Ubuntu 22.04", hostId: "ph-central-01", clusterName: "central-dr" },
+  { id: "vm-006", name: "db-replica", site: "west", status: "running", cpu: 41, mem: 58, ip: "10.20.2.50", kind: "Database", os: "RHEL 9", hostId: "ph-west-01", clusterName: "west-compute" },
 ];
 
 export function inferDeviceType(category: InventoryItem["category"]): DeviceType {

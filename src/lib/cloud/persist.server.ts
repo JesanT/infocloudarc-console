@@ -14,12 +14,15 @@ import type {
   NetEvent,
   NetPort,
   Operator,
+  PhysicalHost,
   ReportDef,
   RestorePoint,
   SanSwitch,
   SnmpConfig,
   StorageArray,
   Subscription,
+  WorkloadApp,
+  WorkloadDatabase,
 } from "@/lib/cloud/model";
 import type { DrAlertRow, DrApp, DrAudit, DrCluster, DrDatabase, DrHost, DrPerf, DrService, DrSignal, DrVm, DrWorkflow } from "@/lib/cloud/dr";
 
@@ -51,6 +54,9 @@ type CloudSnap = {
   restorePoints?: RestorePoint[];
   policies?: BackupPolicy[];
   collectors?: Collector[];
+  hosts?: PhysicalHost[];
+  workloadApps?: WorkloadApp[];
+  workloadDatabases?: WorkloadDatabase[];
   snmp?: SnmpConfig;
   appSubnet?: string;
   appAddress?: string;
@@ -90,7 +96,10 @@ export async function writeConsole(payload: ConsolePayload): Promise<void> {
   const dr = payload.dr as DrSnap;
   await withTransaction(async (sql) => {
     await writeSettings(sql, cloud);
-    await replaceRows(sql, "instances", INSTANCE_COLS, (cloud.instances ?? []).map(instanceRow));
+    await replaceRows(sql, "workload_apps", [], []);
+    await replaceRows(sql, "workload_databases", [], []);
+    await replaceRows(sql, "instances", [], []);
+    await replaceRows(sql, "physical_hosts", [], []);
     await replaceRows(sql, "net_ports", [], []);
     await replaceRows(sql, "net_alerts", ALERT_COLS, (cloud.alerts ?? []).map(alertRow));
     await replaceRows(sql, "net_events", EVENT_COLS, (cloud.events ?? []).map(eventRow));
@@ -99,8 +108,12 @@ export async function writeConsole(payload: ConsolePayload): Promise<void> {
     await replaceRows(sql, "content_repositories", REPO_COLS, (cloud.repositories ?? []).map(repoRow));
     await replaceRows(sql, "subscriptions", SUB_COLS, (cloud.subscriptions ?? []).map(subRow));
     await replaceRows(sql, "activity_log", ACTIVITY_COLS, (cloud.activity ?? []).map(activityRow));
-    await replaceRows(sql, "compute_services", SERVICE_COLS, (cloud.services ?? []).map(serviceRow));
     await replaceRows(sql, "compute_clusters", CLUSTER_COLS, (cloud.clusters ?? []).map(clusterRow));
+    await replaceRows(sql, "compute_services", SERVICE_COLS, (cloud.services ?? []).map(serviceRow));
+    await replaceRows(sql, "physical_hosts", HOST_COLS, (cloud.hosts ?? []).map(hostRow));
+    await replaceRows(sql, "instances", INSTANCE_COLS, (cloud.instances ?? []).map(instanceRow));
+    await replaceRows(sql, "workload_apps", WORKLOAD_APP_COLS, (cloud.workloadApps ?? []).map(workloadAppRow));
+    await replaceRows(sql, "workload_databases", WORKLOAD_DB_COLS, (cloud.workloadDatabases ?? []).map(workloadDbRow));
     await replaceRows(sql, "backup_jobs", BACKUP_COLS, (cloud.backups ?? []).map(backupRow));
     await replaceRows(sql, "report_defs", REPORT_COLS, (cloud.reports ?? []).map(reportRow));
     await replaceRows(sql, "san_switches", SWITCH_COLS, (cloud.switches ?? []).map(switchRow));
@@ -171,6 +184,9 @@ async function assemble(): Promise<ConsolePayload> {
       restorePoints: (await sql<Record<string, unknown>>`select * from restore_points order by workload`).map(restoreFrom),
       policies: (await sql<Record<string, unknown>>`select * from backup_policies order by name`).map(policyFrom),
       collectors: (await sql<Record<string, unknown>>`select * from monitor_collectors order by name`).map(collectorFrom),
+      hosts: (await sql<Record<string, unknown>>`select * from physical_hosts order by name`).map(hostFrom),
+      workloadApps: (await sql<Record<string, unknown>>`select * from workload_apps order by name`).map(workloadAppFrom),
+      workloadDatabases: (await sql<Record<string, unknown>>`select * from workload_databases order by name`).map(workloadDbFrom),
     },
     dr: {
       services: (await sql<Record<string, unknown>>`select * from dr_services order by name`).map(drServiceFrom),
@@ -188,7 +204,7 @@ async function assemble(): Promise<ConsolePayload> {
   };
 }
 
-const INSTANCE_COLS = ["id", "name", "site", "status", "cpu", "mem", "ip", "kind", "os", "in_mbps", "out_mbps", "connections"];
+const INSTANCE_COLS = ["id", "name", "site", "status", "cpu", "mem", "ip", "kind", "os", "in_mbps", "out_mbps", "connections", "host_id", "cluster_name"];
 const ASSET_COLS = ["id", "name", "category", "site", "vendor", "model", "serial", "status", "location", "owner", "ip", "mac", "device_type", "subnet", "source", "last_poll", "snmp_version", "librenms_id", "uptime", "traffic_in_mbps", "traffic_out_mbps", "ports_up", "ports_down", "sys_descr", "parent_id"];
 const PORT_COLS = ["id", "asset_id", "name", "if_index", "admin", "oper", "speed", "in_mbps", "out_mbps", "errors", "face", "port_group", "down_since", "alarm_ack"];
 const ALERT_COLS = ["id", "severity", "asset_id", "message", "at", "channel"];
@@ -207,6 +223,9 @@ const TARGET_COLS = ["id", "name", "site", "free_space", "status"];
 const RESTORE_COLS = ["id", "workload", "points", "latest", "site"];
 const POLICY_COLS = ["id", "name", "retention", "copy_to", "scope"];
 const COLLECTOR_COLS = ["id", "name", "scope", "interval", "status"];
+const HOST_COLS = ["id", "name", "site", "cluster_name", "status", "cpu", "mem", "ip"];
+const WORKLOAD_APP_COLS = ["id", "name", "kind", "service_name", "vm_id", "host_id", "port", "status"];
+const WORKLOAD_DB_COLS = ["id", "name", "engine", "service_name", "vm_id", "host_id", "status"];
 const DR_SERVICE_COLS = ["id", "name", "site", "standby_site", "tier", "status", "mode", "rpo", "rto", "owner"];
 const DR_HOST_COLS = ["id", "name", "site", "pair", "status", "cpu", "mem", "ip"];
 const DR_CLUSTER_COLS = ["id", "name", "site", "kind", "nodes", "status"];
@@ -220,7 +239,7 @@ const DR_ALERT_COLS = ["id", "target", "message", "severity", "state"];
 const AUDIT_COLS = ["id", "actor", "action", "target", "at"];
 
 function instanceRow(row: Instance) {
-  return [row.id, row.name, row.site, row.status, row.cpu, row.mem, row.ip, row.kind, row.os, row.inMbps ?? null, row.outMbps ?? null, row.connections ?? null];
+  return [row.id, row.name, row.site, row.status, row.cpu, row.mem, row.ip, row.kind, row.os, row.inMbps ?? null, row.outMbps ?? null, row.connections ?? null, row.hostId || null, row.clusterName || null];
 }
 function assetRow(row: InventoryItem) {
   return [row.id, row.name, row.category, row.site, row.vendor, row.model, row.serial, row.status, row.location, row.owner, row.ip, row.mac, row.deviceType, row.subnet, row.source, row.lastPoll, row.snmpVersion, row.librenmsId, row.uptime, row.trafficInMbps, row.trafficOutMbps, row.portsUp, row.portsDown, row.sysDescr, row.parentId];
@@ -276,6 +295,15 @@ function policyRow(row: BackupPolicy) {
 function collectorRow(row: Collector) {
   return [row.id, row.name, row.scope, row.interval, row.status];
 }
+function hostRow(row: PhysicalHost) {
+  return [row.id, row.name, row.site, row.clusterName || null, row.status, row.cpu, row.mem, row.ip];
+}
+function workloadAppRow(row: WorkloadApp) {
+  return [row.id, row.name, row.kind, row.serviceName, row.vmId || null, row.hostId || null, row.port, row.status];
+}
+function workloadDbRow(row: WorkloadDatabase) {
+  return [row.id, row.name, row.engine, row.serviceName, row.vmId || null, row.hostId || null, row.status];
+}
 function drServiceRow(row: DrService) {
   return [row.id, row.name, row.site, row.standbySite, row.tier, row.status, row.mode, row.rpo, row.rto, row.owner];
 }
@@ -325,6 +353,8 @@ function instanceFrom(row: Record<string, unknown>): Instance {
   if (row.in_mbps != null) item.inMbps = Number(row.in_mbps);
   if (row.out_mbps != null) item.outMbps = Number(row.out_mbps);
   if (row.connections != null) item.connections = Number(row.connections);
+  item.hostId = row.host_id == null ? null : str(row.host_id);
+  item.clusterName = row.cluster_name == null ? null : str(row.cluster_name);
   return item;
 }
 function assetFrom(row: Record<string, unknown>): InventoryItem {
@@ -421,6 +451,15 @@ function policyFrom(row: Record<string, unknown>): BackupPolicy {
 }
 function collectorFrom(row: Record<string, unknown>): Collector {
   return { id: str(row.id), name: str(row.name), scope: str(row.scope), interval: str(row.interval), status: str(row.status) as Collector["status"] };
+}
+function hostFrom(row: Record<string, unknown>): PhysicalHost {
+  return { id: str(row.id), name: str(row.name), site: str(row.site) as PhysicalHost["site"], clusterName: row.cluster_name == null ? null : str(row.cluster_name), status: str(row.status) as PhysicalHost["status"], cpu: Number(row.cpu), mem: Number(row.mem), ip: str(row.ip) };
+}
+function workloadAppFrom(row: Record<string, unknown>): WorkloadApp {
+  return { id: str(row.id), name: str(row.name), kind: str(row.kind), serviceName: str(row.service_name), vmId: row.vm_id == null ? null : str(row.vm_id), hostId: row.host_id == null ? null : str(row.host_id), port: Number(row.port), status: str(row.status) as WorkloadApp["status"] };
+}
+function workloadDbFrom(row: Record<string, unknown>): WorkloadDatabase {
+  return { id: str(row.id), name: str(row.name), engine: str(row.engine), serviceName: str(row.service_name), vmId: row.vm_id == null ? null : str(row.vm_id), hostId: row.host_id == null ? null : str(row.host_id), status: str(row.status) as WorkloadDatabase["status"] };
 }
 function drServiceFrom(row: Record<string, unknown>): DrService {
   return { id: str(row.id), name: str(row.name), site: str(row.site) as DrService["site"], standbySite: str(row.standby_site) as DrService["standbySite"], tier: str(row.tier), status: str(row.status) as DrService["status"], mode: str(row.mode) as DrService["mode"], rpo: str(row.rpo), rto: str(row.rto), owner: str(row.owner) };

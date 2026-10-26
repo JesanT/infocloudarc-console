@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
+import { CatalogTable } from "@/components/catalog-table";
 import { Button, Empty, Field, Kpi, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
 import { hypervAction } from "@/lib/cloud/hyperv";
-import { SITES, inScope, matches, siteLabel, type Instance, type SiteKey } from "@/lib/cloud/model";
+import { SITES, inScope, matches, siteLabel, type ComputeCluster, type ComputeService, type Instance, type PhysicalHost, type SiteKey, type WorkloadApp, type WorkloadDatabase } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
 
 type SummaryRow = {
@@ -19,20 +20,96 @@ export function ServicesView() {
   const site = useCloud((s) => s.site);
   const query = useCloud((s) => s.query);
   const services = useCloud((s) => s.services);
-  const rows = services.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.note, item.site])).map((item) => ({
-    id: item.name,
-    name: item.name,
-    site: siteLabel(item.site),
-    status: item.health,
-    availability: item.availability,
-    performance: item.performance,
-    summary: `${item.instances} instances · ${item.note}`,
-  }));
-  return <WorkloadBoard title="Services" subtitle="Summary, status, availability, and performance for published services." rows={rows} />;
+  const apps = useCloud((s) => s.workloadApps);
+  const databases = useCloud((s) => s.workloadDatabases);
+  const instances = useCloud((s) => s.instances);
+  const hosts = useCloud((s) => s.hosts);
+  const saveService = useCloud((s) => s.saveService);
+  const deleteService = useCloud((s) => s.deleteService);
+  const saveApp = useCloud((s) => s.saveWorkloadApp);
+  const deleteApp = useCloud((s) => s.deleteWorkloadApp);
+  const saveDb = useCloud((s) => s.saveWorkloadDatabase);
+  const deleteDb = useCloud((s) => s.deleteWorkloadDatabase);
+  const rows = services.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.note, item.site]));
+  const visible = new Set(rows.map((item) => item.name));
+  const allow = role !== "site" || site === "east" || site === "all";
+
+  return (
+    <div className="space-y-4">
+      <CatalogTable<ComputeService>
+        title="Services"
+        subtitle="A service depends on an application, a database, or both."
+        rows={rows}
+        idKey="name"
+        allow={allow}
+        columns={[
+          { key: "name", label: "Name" },
+          { key: "site", label: "Site", options: ["east", "west", "central"] },
+          { key: "health", label: "Status", options: ["Healthy", "Degraded"] },
+          { key: "availability", label: "Availability", numeric: true },
+          { key: "performance", label: "Performance", numeric: true },
+          { key: "note", label: "Note" },
+        ]}
+        blank={() => ({ name: "", site: "east", health: "Healthy", instances: 1, availability: 99.9, performance: 95, note: "" })}
+        onSave={saveService}
+        onDelete={deleteService}
+      />
+      <DependencyTable
+        title="Applications"
+        subtitle="Each application runs on a virtual machine, a physical host, or both."
+        rows={apps.filter((item) => visible.has(item.serviceName))}
+        kind="app"
+        services={rows}
+        instances={instances}
+        hosts={hosts}
+        allow={allow}
+        onSave={(row) => saveApp(row as WorkloadApp)}
+        onDelete={deleteApp}
+      />
+      <DependencyTable
+        title="Databases"
+        subtitle="Each database runs on a virtual machine, a physical host, or both."
+        rows={databases.filter((item) => visible.has(item.serviceName))}
+        kind="db"
+        services={rows}
+        instances={instances}
+        hosts={hosts}
+        allow={allow}
+        onSave={(row) => saveDb(row as WorkloadDatabase)}
+        onDelete={deleteDb}
+      />
+    </div>
+  );
 }
 
 export function DatabasesView() {
-  return <InstanceBoard kind="Database" title="Databases" subtitle="Database services in the current site scope." />;
+  const role = useCloud((s) => s.role);
+  const site = useCloud((s) => s.site);
+  const query = useCloud((s) => s.query);
+  const services = useCloud((s) => s.services);
+  const databases = useCloud((s) => s.workloadDatabases);
+  const instances = useCloud((s) => s.instances);
+  const hosts = useCloud((s) => s.hosts);
+  const saveDb = useCloud((s) => s.saveWorkloadDatabase);
+  const deleteDb = useCloud((s) => s.deleteWorkloadDatabase);
+  const visibleServices = services.filter((item) => inScope(role, site, item.site));
+  const names = new Set(visibleServices.map((item) => item.name));
+  const rows = databases.filter((item) => names.has(item.serviceName) && matches(query, [item.name, item.engine, item.serviceName]));
+  const allow = role !== "site" || site === "east" || site === "all";
+  return (
+    <DependencyTable
+      title="Databases"
+      subtitle="A database belongs to a service and runs on a virtual machine, a physical host, or both."
+      rows={rows}
+      kind="db"
+      services={visibleServices}
+      instances={instances}
+      hosts={hosts}
+      allow={allow}
+      onSave={(row) => saveDb(row as WorkloadDatabase)}
+      onDelete={deleteDb}
+    />
+  );
 }
 
 export function LoadBalancersView() {
@@ -63,16 +140,178 @@ export function ClustersView() {
   const site = useCloud((s) => s.site);
   const query = useCloud((s) => s.query);
   const clusters = useCloud((s) => s.clusters);
-  const rows = clusters.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.version])).map((item) => ({
-    id: item.name,
-    name: item.name,
-    site: siteLabel(item.site),
-    status: item.ha,
-    availability: item.availability,
-    performance: item.performance,
-    summary: `${item.nodes} nodes · ${item.version}`,
-  }));
-  return <WorkloadBoard title="Clusters" subtitle="Hyper-V clusters by site. Operations against a host are under Instances." rows={rows} />;
+  const hosts = useCloud((s) => s.hosts);
+  const saveCluster = useCloud((s) => s.saveCluster);
+  const deleteCluster = useCloud((s) => s.deleteCluster);
+  const saveHost = useCloud((s) => s.saveHost);
+  const deleteHost = useCloud((s) => s.deleteHost);
+  const rows = clusters.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.version]));
+  const clusterNames = rows.map((item) => item.name);
+  const hostRows = hosts.filter((item) => inScope(role, site, item.site) && (item.clusterName == null || clusterNames.includes(item.clusterName) || matches(query, [item.name, item.ip])));
+  const allow = role !== "site" || site === "east" || site === "all";
+  return (
+    <div className="space-y-4">
+      <CatalogTable<ComputeCluster>
+        title="Clusters"
+        subtitle="Hyper-V clusters. Physical hosts belong to a cluster."
+        rows={rows}
+        idKey="name"
+        allow={allow}
+        columns={[
+          { key: "name", label: "Name" },
+          { key: "site", label: "Site", options: ["east", "west", "central"] },
+          { key: "nodes", label: "Nodes", numeric: true },
+          { key: "ha", label: "Status", options: ["Healthy", "Degraded"] },
+          { key: "version", label: "Version" },
+          { key: "availability", label: "Availability", numeric: true },
+          { key: "performance", label: "Performance", numeric: true },
+        ]}
+        blank={() => ({ name: "", site: "east", nodes: 1, ha: "Healthy", version: "Hyper-V 2022", availability: 99.9, performance: 90 })}
+        onSave={(row) => saveCluster(row)}
+        onDelete={deleteCluster}
+      />
+      <CatalogTable<PhysicalHost>
+        title="Physical hosts"
+        subtitle="A host can belong to a cluster. Virtual machines attach to a host."
+        rows={hostRows}
+        idKey="id"
+        allow={allow}
+        columns={[
+          { key: "id", label: "Id" },
+          { key: "name", label: "Name" },
+          { key: "site", label: "Site", options: ["east", "west", "central"] },
+          { key: "clusterName", label: "Cluster", options: ["", ...clusters.map((item) => item.name)] },
+          { key: "status", label: "Status", options: ["Online", "Degraded", "Offline"] },
+          { key: "ip", label: "IP" },
+          { key: "cpu", label: "CPU", numeric: true },
+          { key: "mem", label: "Memory", numeric: true },
+        ]}
+        blank={() => ({ id: `ph-${Date.now()}`, name: "", site: "east", clusterName: clusters[0]?.name ?? null, status: "Online", cpu: 10, mem: 20, ip: "" })}
+        onSave={(row) => saveHost({ ...row, clusterName: row.clusterName || null })}
+        onDelete={deleteHost}
+      />
+    </div>
+  );
+}
+
+function DependencyTable({
+  title,
+  subtitle,
+  rows,
+  kind,
+  services,
+  instances,
+  hosts,
+  allow,
+  onSave,
+  onDelete,
+}: {
+  title: string;
+  subtitle: string;
+  rows: Array<WorkloadApp | WorkloadDatabase>;
+  kind: "app" | "db";
+  services: ComputeService[];
+  instances: Instance[];
+  hosts: { id: string; name: string }[];
+  allow: boolean;
+  onSave: (row: WorkloadApp | WorkloadDatabase) => void;
+  onDelete: (id: string) => void;
+}) {
+  const flash = useCloud((s) => s.flash);
+  const [draft, setDraft] = useState<(WorkloadApp | WorkloadDatabase) | null>(null);
+  const vmName = (id: string | null) => instances.find((item) => item.id === id)?.name ?? "—";
+  const hostName = (id: string | null) => hosts.find((item) => item.id === id)?.name ?? "—";
+  return (
+    <Panel
+      title={title}
+      subtitle={subtitle}
+      action={allow ? <Button variant="primary" onClick={() => setDraft(kind === "app"
+        ? { id: `app-${Date.now()}`, name: "", kind: "tomcat", serviceName: services[0]?.name ?? "", vmId: null, hostId: hosts[0]?.id ?? null, port: 8080, status: "Healthy" }
+        : { id: `db-${Date.now()}`, name: "", engine: "postgresql", serviceName: services[0]?.name ?? "", vmId: null, hostId: hosts[0]?.id ?? null, status: "Healthy" })}>Add</Button> : undefined}
+    >
+      {draft && (
+        <form
+          className="mb-4 grid gap-3 md:grid-cols-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!draft.vmId && !draft.hostId) {
+              flash("Choose a virtual machine or a physical host.");
+              return;
+            }
+            if (!draft.serviceName || !draft.name.trim()) {
+              flash("Name and service are required.");
+              return;
+            }
+            onSave(draft);
+            setDraft(null);
+          }}
+        >
+          <Field label="Name"><input className={fieldClass} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
+          <Field label="Service">
+            <Select value={draft.serviceName} onChange={(event) => setDraft({ ...draft, serviceName: event.target.value })}>
+              {services.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
+            </Select>
+          </Field>
+          <Field label={kind === "app" ? "Application kind" : "Engine"}>
+            <Select
+              value={"kind" in draft ? draft.kind : draft.engine}
+              onChange={(event) => setDraft("kind" in draft ? { ...draft, kind: event.target.value } : { ...draft, engine: event.target.value })}
+            >
+              {(kind === "app" ? ["tomcat", "iis", "other"] : ["postgresql", "mssql", "mysql", "mongodb", "other"]).map((option) => <option key={option}>{option}</option>)}
+            </Select>
+          </Field>
+          <Field label="Virtual machine">
+            <Select value={draft.vmId ?? ""} onChange={(event) => setDraft({ ...draft, vmId: event.target.value || null })}>
+              <option value="">None</option>
+              {instances.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </Select>
+          </Field>
+          <Field label="Physical host">
+            <Select value={draft.hostId ?? ""} onChange={(event) => setDraft({ ...draft, hostId: event.target.value || null })}>
+              <option value="">None</option>
+              {hosts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </Select>
+          </Field>
+          {"port" in draft && (
+            <Field label="Port"><input className={fieldClass} value={draft.port} onChange={(event) => setDraft({ ...draft, port: Number(event.target.value || 0) })} /></Field>
+          )}
+          <div className="flex items-end gap-2">
+            <Button variant="primary" type="submit">Save</Button>
+            <Button onClick={() => setDraft(null)}>Cancel</Button>
+          </div>
+        </form>
+      )}
+      {rows.length === 0 ? <Empty>No rows yet.</Empty> : (
+        <TableWrap>
+          <Table>
+            <thead>
+              <tr><Th>Name</Th><Th>Service</Th><Th>{kind === "app" ? "Kind" : "Engine"}</Th><Th>Virtual machine</Th><Th>Physical host</Th><Th>Status</Th>{allow && <Th>Actions</Th>}</tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.id}>
+                  <Td>{row.name}</Td>
+                  <Td>{row.serviceName}</Td>
+                  <Td>{"kind" in row ? row.kind : row.engine}</Td>
+                  <Td>{vmName(row.vmId)}</Td>
+                  <Td>{hostName(row.hostId)}</Td>
+                  <Td><StatusPill value={row.status} /></Td>
+                  {allow && (
+                    <Td>
+                      <div className="flex gap-1">
+                        <Button onClick={() => setDraft(row)}>Edit</Button>
+                        <Button variant="danger" onClick={() => onDelete(row.id)}>Delete</Button>
+                      </div>
+                    </Td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </TableWrap>
+      )}
+    </Panel>
+  );
 }
 
 export function InstancesView() {
@@ -265,7 +504,7 @@ function InstanceBoard({
           status: item.status === "running" ? "Healthy" : "Offline",
           availability: scores.availability,
           performance: scores.performance,
-          summary: `${item.kind} · ${item.os} · ${item.ip}`,
+          summary: `${item.kind} · ${item.os} · ${item.ip}${item.hostId ? ` · host ${item.hostId}` : ""}`,
         };
       })}
     />

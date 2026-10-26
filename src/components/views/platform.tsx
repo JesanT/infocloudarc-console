@@ -1,6 +1,7 @@
-import { Empty, Kpi, Panel, StatusPill, Table, TableWrap, Td, Th } from "@/components/ui";
+import { Kpi, Panel, StatusPill, Table, TableWrap, Td, Th } from "@/components/ui";
 import { Trend } from "@/components/charts";
-import { inScope, matches, siteLabel } from "@/lib/cloud/model";
+import { CatalogTable } from "@/components/catalog-table";
+import { inScope, matches, siteLabel, type BackupJob, type BackupPolicy, type BackupTarget, type Operator, type RestorePoint, type SanSwitch, type StorageArray } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
 export { NetworkView } from "@/components/views/network";
 
@@ -15,46 +16,54 @@ export function StorageView({ kind }: { kind: "san" | "array" }) {
   const { role, site, query } = useScope();
   const switches = useCloud((s) => s.switches);
   const arrays = useCloud((s) => s.arrays);
+  const saveSwitch = useCloud((s) => s.saveSwitch);
+  const deleteSwitch = useCloud((s) => s.deleteSwitch);
+  const saveArray = useCloud((s) => s.saveArray);
+  const deleteArray = useCloud((s) => s.deleteArray);
+  const allow = role !== "site" || site === "east" || site === "all";
   if (kind === "san") {
     const rows = switches.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.vendor]));
     return (
-      <Panel title="SAN switches" subtitle="Fabric switches by site">
-        <div className="grid gap-3 md:grid-cols-3">
-          {rows.map((item) => (
-            <article key={item.name} className="rounded-lg border border-line bg-inset p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="font-medium">{item.name}</div>
-                <StatusPill value={item.status} />
-              </div>
-              <p className="mt-2 text-sm text-muted">{item.vendor} · {item.ports} ports</p>
-              <p className="mt-1 text-sm text-faint">{siteLabel(item.site)} · {item.note}</p>
-            </article>
-          ))}
-        </div>
-        {rows.length === 0 && <Empty>No SAN switches in this view.</Empty>}
-      </Panel>
+      <CatalogTable<SanSwitch>
+        title="SAN switches"
+        subtitle="Fabric switches by site."
+        rows={rows}
+        idKey="name"
+        allow={allow}
+        columns={[
+          { key: "name", label: "Name" },
+          { key: "site", label: "Site", options: ["east", "west", "central"] },
+          { key: "vendor", label: "Vendor" },
+          { key: "ports", label: "Ports", numeric: true },
+          { key: "status", label: "Status", options: ["Online", "Degraded", "Offline"] },
+          { key: "note", label: "Note" },
+        ]}
+        blank={() => ({ name: "", site: "east", vendor: "", ports: 48, status: "Online", note: "" })}
+        onSave={saveSwitch}
+        onDelete={deleteSwitch}
+      />
     );
   }
   const rows = arrays.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.kind]));
   return (
-    <Panel title="Storage arrays" subtitle="Block capacity by site">
-      <div className="grid gap-3 md:grid-cols-3">
-        {rows.map((item) => (
-          <article key={item.name} className="rounded-lg border border-line bg-inset p-3">
-            <div className="flex items-start justify-between gap-2">
-              <div className="font-medium">{item.name}</div>
-              <StatusPill value={item.status} />
-            </div>
-            <p className="mt-2 text-sm text-muted">{item.kind} · {item.usable} usable</p>
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-canvas">
-              <div className="h-full bg-info" style={{ width: `${item.used}%` }} />
-            </div>
-            <p className="mt-2 font-mono text-xs text-faint">{item.used}% used · {siteLabel(item.site)}</p>
-          </article>
-        ))}
-      </div>
-      {rows.length === 0 && <Empty>No arrays in this view.</Empty>}
-    </Panel>
+    <CatalogTable<StorageArray>
+      title="Storage arrays"
+      subtitle="Block capacity by site."
+      rows={rows}
+      idKey="name"
+      allow={allow}
+      columns={[
+        { key: "name", label: "Name" },
+        { key: "site", label: "Site", options: ["east", "west", "central"] },
+        { key: "kind", label: "Kind" },
+        { key: "usable", label: "Usable" },
+        { key: "used", label: "Used %", numeric: true },
+        { key: "status", label: "Status", options: ["Online", "Degraded", "Offline"] },
+      ]}
+      blank={() => ({ name: "", site: "east", kind: "All-flash", usable: "10 TB", used: 10, status: "Online" })}
+      onSave={saveArray}
+      onDelete={deleteArray}
+    />
   );
 }
 
@@ -133,10 +142,13 @@ export function MonitorConfig() {
 export function BackupJobs() {
   const { role, site, query } = useScope();
   const backups = useCloud((s) => s.backups);
+  const saveBackup = useCloud((s) => s.saveBackup);
+  const deleteBackup = useCloud((s) => s.deleteBackup);
   const rows = backups.filter((item) => inScope(role, site, item.site) && matches(query, [item.job, item.type]));
   const success = rows.filter((item) => item.status === "Success").length;
   const warning = rows.filter((item) => item.status === "Warning").length;
   const failed = rows.filter((item) => item.status === "Failed").length;
+  const allow = role !== "site" || site === "east" || site === "all";
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -145,105 +157,109 @@ export function BackupJobs() {
         <Kpi label="Warning" value={String(warning)} />
         <Kpi label="Failed" value={String(failed)} />
       </div>
-      <Panel title="Jobs" subtitle="Full, incremental, and continuous protection">
-        <TableWrap>
-          <Table>
-            <thead>
-              <tr><Th>Job</Th><Th>Type</Th><Th>Status</Th><Th>Last</Th><Th>Size</Th><Th>Site</Th></tr>
-            </thead>
-            <tbody>
-              {rows.map((job) => (
-                <tr key={job.id}>
-                  <Td>{job.job}</Td>
-                  <Td>{job.type}</Td>
-                  <Td><StatusPill value={job.status} /></Td>
-                  <Td>{job.last}</Td>
-                  <Td mono>{job.size}</Td>
-                  <Td>{siteLabel(job.site)}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        </TableWrap>
-        {rows.length === 0 && <Empty>No jobs in this view.</Empty>}
-      </Panel>
+      <CatalogTable<BackupJob>
+        title="Jobs"
+        subtitle="Full, incremental, and continuous protection."
+        rows={rows}
+        idKey="id"
+        allow={allow}
+        columns={[
+          { key: "id", label: "Id" },
+          { key: "job", label: "Job" },
+          { key: "type", label: "Type", options: ["Full", "Incremental", "Continuous"] },
+          { key: "status", label: "Status", options: ["Success", "Warning", "Failed"] },
+          { key: "last", label: "Last" },
+          { key: "size", label: "Size" },
+          { key: "site", label: "Site", options: ["east", "west", "central"] },
+        ]}
+        blank={() => ({ id: `job-${Date.now()}`, job: "", type: "Full", status: "Success", last: "Not run", size: "0 GB", site: "east" })}
+        onSave={saveBackup}
+        onDelete={deleteBackup}
+      />
     </div>
   );
 }
 
 export function BackupRepos() {
+  const { role, site, query } = useScope();
   const targets = useCloud((s) => s.backupTargets);
-  const { role, site } = useScope();
-  const rows = targets.filter((item) => inScope(role, site, item.site));
+  const saveBackupTarget = useCloud((s) => s.saveBackupTarget);
+  const deleteBackupTarget = useCloud((s) => s.deleteBackupTarget);
+  const rows = targets.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.free]));
+  const allow = role !== "site" || site === "east" || site === "all";
   return (
-    <Panel title="Backup repositories" subtitle="Targets used by protection jobs. Content mirrors live under Administration.">
-      <div className="grid gap-3 md:grid-cols-3">
-        {rows.map((item) => (
-          <article key={item.id} className="rounded-lg border border-line bg-inset p-3">
-            <div className="font-medium">{item.name}</div>
-            <p className="mt-1 text-sm text-muted">{siteLabel(item.site)}</p>
-            <div className="mt-3 flex items-center justify-between">
-              <span className="font-mono text-xs">{item.free}</span>
-              <StatusPill value={item.status} />
-            </div>
-          </article>
-        ))}
-      </div>
-      {rows.length === 0 && <Empty>No backup repositories in this view.</Empty>}
-    </Panel>
+    <CatalogTable<BackupTarget>
+      title="Backup repositories"
+      subtitle="Targets used by protection jobs."
+      rows={rows}
+      idKey="id"
+      allow={allow}
+      columns={[
+        { key: "id", label: "Id" },
+        { key: "name", label: "Name" },
+        { key: "site", label: "Site", options: ["east", "west", "central"] },
+        { key: "free", label: "Free space" },
+        { key: "status", label: "Status", options: ["Online", "Warning"] },
+      ]}
+      blank={() => ({ id: `repo-${Date.now()}`, name: "", site: "east" as const, free: "0 TB free", status: "Online" as const })}
+      onSave={saveBackupTarget}
+      onDelete={deleteBackupTarget}
+    />
   );
 }
 
 export function RestoreView() {
+  const { role, site, query } = useScope();
   const points = useCloud((s) => s.restorePoints);
-  const { role, site } = useScope();
-  const rows = points.filter((item) => inScope(role, site, item.site));
+  const saveRestorePoint = useCloud((s) => s.saveRestorePoint);
+  const deleteRestorePoint = useCloud((s) => s.deleteRestorePoint);
+  const rows = points.filter((item) => inScope(role, site, item.site) && matches(query, [item.workload]));
+  const allow = role !== "site" || site === "east" || site === "all";
   return (
-    <Panel title="Restore" subtitle="Pick a recovery point. Guest files, full machine, or instant recovery.">
-      <TableWrap>
-        <Table>
-          <thead>
-            <tr><Th>Workload</Th><Th>Points</Th><Th>Latest</Th><Th>Site</Th></tr>
-          </thead>
-          <tbody>
-            {rows.map((item) => (
-              <tr key={item.id}>
-                <Td>{item.workload}</Td>
-                <Td mono>{item.points}</Td>
-                <Td>{item.latest}</Td>
-                <Td>{siteLabel(item.site)}</Td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      </TableWrap>
-      {rows.length === 0 && <Empty>No restore points in this view.</Empty>}
-    </Panel>
+    <CatalogTable<RestorePoint>
+      title="Restore"
+      subtitle="Recovery points for a workload. Guest files, full machine, or instant recovery."
+      rows={rows}
+      idKey="id"
+      allow={allow}
+      columns={[
+        { key: "id", label: "Id" },
+        { key: "workload", label: "Workload" },
+        { key: "points", label: "Points", numeric: true },
+        { key: "latest", label: "Latest" },
+        { key: "site", label: "Site", options: ["east", "west", "central"] },
+      ]}
+      blank={() => ({ id: `rp-${Date.now()}`, workload: "", points: 1, latest: "Not run", site: "east" as const })}
+      onSave={saveRestorePoint}
+      onDelete={deleteRestorePoint}
+    />
   );
 }
 
 export function PoliciesView() {
+  const { role, query } = useScope();
   const policies = useCloud((s) => s.policies);
+  const savePolicy = useCloud((s) => s.savePolicy);
+  const deletePolicy = useCloud((s) => s.deletePolicy);
+  const rows = policies.filter((item) => matches(query, [item.name, item.scope, item.retention]));
   return (
-    <Panel title="Policies" subtitle="Retention and copy rules">
-      <TableWrap>
-        <Table>
-          <thead>
-            <tr><Th>Policy</Th><Th>Retention</Th><Th>Copy</Th><Th>Scope</Th></tr>
-          </thead>
-          <tbody>
-            {policies.map((item) => (
-              <tr key={item.id}>
-                <Td>{item.name}</Td>
-                <Td>{item.retention}</Td>
-                <Td>{item.copy}</Td>
-                <Td>{item.scope}</Td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      </TableWrap>
-    </Panel>
+    <CatalogTable<BackupPolicy>
+      title="Policies"
+      subtitle="Retention and copy rules. Site access cannot change these."
+      rows={rows}
+      idKey="id"
+      allow={role !== "site"}
+      columns={[
+        { key: "id", label: "Id" },
+        { key: "name", label: "Policy" },
+        { key: "retention", label: "Retention" },
+        { key: "copy", label: "Copy" },
+        { key: "scope", label: "Scope" },
+      ]}
+      blank={() => ({ id: `pol-${Date.now()}`, name: "", retention: "7 daily", copy: "None", scope: "All sites" })}
+      onSave={savePolicy}
+      onDelete={deletePolicy}
+    />
   );
 }
 
@@ -281,30 +297,29 @@ export function RbacView() {
 }
 
 export function UsersView() {
-  const query = useCloud((s) => s.query);
+  const { role, query } = useScope();
   const operators = useCloud((s) => s.operators);
-  const rows = operators.filter((user) => matches(query, [user.name, user.role, user.auth]));
+  const saveOperator = useCloud((s) => s.saveOperator);
+  const deleteOperator = useCloud((s) => s.deleteOperator);
+  const rows = operators.filter((user) => matches(query, [user.name, user.role, user.auth, user.sites]));
   return (
-    <Panel title="Users and access" subtitle="Local accounts, with Active Directory optional">
-      <TableWrap>
-        <Table>
-          <thead>
-            <tr><Th>User</Th><Th>Role</Th><Th>Sites</Th><Th>Auth</Th><Th>Status</Th></tr>
-          </thead>
-          <tbody>
-            {rows.map((user) => (
-              <tr key={user.name}>
-                <Td mono>{user.name}</Td>
-                <Td>{user.role}</Td>
-                <Td>{user.sites}</Td>
-                <Td>{user.auth}</Td>
-                <Td><StatusPill value={user.status} /></Td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      </TableWrap>
-    </Panel>
+    <CatalogTable<Operator>
+      title="Users and access"
+      subtitle="Local accounts, with Active Directory optional. Site access cannot change operators."
+      rows={rows}
+      idKey="name"
+      allow={role !== "site"}
+      columns={[
+        { key: "name", label: "User" },
+        { key: "role", label: "Role", options: ["Vendor", "Global", "Site"] },
+        { key: "sites", label: "Sites" },
+        { key: "auth", label: "Auth", options: ["Local", "Active Directory"] },
+        { key: "status", label: "Status", options: ["Active", "Disabled"] },
+      ]}
+      blank={() => ({ name: "", role: "Site", sites: "Site-East", auth: "Local", status: "Active" as const })}
+      onSave={saveOperator}
+      onDelete={deleteOperator}
+    />
   );
 }
 
