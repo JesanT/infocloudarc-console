@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { pathOk } from "@/lib/cloud/deploy";
 import type { HypervisorKind } from "@/lib/cloud/hypervisor";
-import { emptyGuest, parseHypervHardware, parseLibvirtHardware, type GuestView } from "@/lib/cloud/hardware";
+import { emptyGuest, parseGuestList, parseHypervHardware, parseLibvirtHardware, type GuestView, type ListedGuest } from "@/lib/cloud/hardware";
 import { sshInvocation } from "@/lib/cloud/ssh-auth.server";
 
 export type HardwareOp =
@@ -360,4 +360,64 @@ export async function runHardware(input: HardwareRequest): Promise<HardwareResul
     ? input.kind === "libvirt" ? parseLibvirtHardware(again.out) : parseHypervHardware(again.out)
     : emptyGuest();
   return { ok: true, message: explain(text), hardware: hardware.state ? hardware : null };
+}
+
+const LIST_HV = `
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) { throw 'Hyper-V module is not available on this server.' }
+$cred = $null
+if ($env:HV_USER -and $env:HV_PASSWORD) {
+  $sec = ConvertTo-SecureString $env:HV_PASSWORD -AsPlainText -Force
+  $cred = New-Object System.Management.Automation.PSCredential($env:HV_USER, $sec)
+}
+$remote = @{}
+if ($env:HV_COMPUTER) { $remote.ComputerName = $env:HV_COMPUTER }
+if ($env:HV_COMPUTER -and $cred) { $remote.Credential = $cred }
+Get-VM @remote | ForEach-Object {
+  $disk = ''
+  $drive = @(Get-VMHardDiskDrive -VMName $_.Name @remote) | Select-Object -First 1
+  if ($drive) { $disk = [string]$drive.Path }
+  Write-Output ('VM|' + $_.Name + '|' + $_.State + '|' + $disk)
+}
+`;
+
+export async function listGuests(input: {
+  kind: HardwareRequest["kind"];
+  address: string;
+  port: number;
+  login: string;
+  password: string;
+}): Promise<{ ok: boolean; message: string; guests: ListedGuest[] }> {
+  const request: HardwareRequest = {
+    ...input,
+    name: "inventory",
+    diskPath: "",
+    switchName: "",
+    change: { op: "inspect" },
+  };
+  const remote = `c=qemu:///system
+virsh -c "$c" list --all --name | while IFS= read -r name; do
+  [ -z "$name" ] && continue
+  state=$(virsh -c "$c" domstate "$name" 2>/dev/null | head -n 1)
+  disk=$(virsh -c "$c" domblklist "$name" --details 2>/dev/null | awk 'NR>2 && $2=="disk" { $1=""; $2=""; $3=""; sub(/^[[:space:]]+/, ""); print; exit }')
+  printf 'VM|%s|%s|%s\\n' "$name" "$state" "$disk"
+done`;
+  if (input.kind === "libvirt") {
+    const result = await ssh(request, remote, 30000);
+    const text = `${result.out}\n${result.err}`;
+    if (result.code !== 0) return { ok: false, message: refused(text, input.password), guests: [] };
+    return { ok: true, message: "The hypervisor answered.", guests: parseGuestList(result.out) };
+  }
+  const pwsh = await which("pwsh");
+  if (!pwsh) return { ok: false, message: "PowerShell is not installed on this server.", guests: [] };
+  const result = await run(pwsh, ["-NoProfile", "-NonInteractive", "-Command", LIST_HV], 30000, {
+    ...process.env,
+    HV_COMPUTER: input.address,
+    HV_USER: input.login,
+    HV_PASSWORD: input.password,
+  });
+  const text = `${result.out}\n${result.err}`;
+  if (result.code !== 0) return { ok: false, message: refused(text, input.password), guests: [] };
+  return { ok: true, message: "The hypervisor answered.", guests: parseGuestList(result.out) };
 }

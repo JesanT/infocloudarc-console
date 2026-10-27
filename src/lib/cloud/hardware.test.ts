@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseHypervHardware, parseLibvirtHardware } from "./hardware.ts";
+import { parseGuestList, parseHypervHardware, parseLibvirtHardware } from "./hardware.ts";
 
 const LIBVIRT = `
 ##INFO
@@ -38,6 +38,14 @@ test("libvirt hardware output keeps disks, the bridge, and a reported address", 
   assert.equal(view.nics[0]?.address, "10.10.1.50");
 });
 
+test("a hypervisor listing keeps a running guest and its disk", () => {
+  const guests = parseGuestList("VM|testvm|running|/vdisk/repo/testvm.qcow2\nVM|old|shut off|\n");
+  assert.equal(guests[0]?.name, "testvm");
+  assert.equal(guests[0]?.state, "running");
+  assert.equal(guests[0]?.diskPath, "/vdisk/repo/testvm.qcow2");
+  assert.equal(guests[1]?.state, "stopped");
+  assert.equal(guests[1]?.diskPath, "");
+});
 test("hyper-v hardware json does not invent an address", () => {
   const view = parseHypervHardware(JSON.stringify({
     state: "Running",

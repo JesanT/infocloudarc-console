@@ -114,3 +114,24 @@ export const guestConsole = createServerFn({ method: "POST" })
     session.closeConsole(data.id);
     return { ok: true, id: data.id, message: "", text: "", next: 0, closed: true };
   });
+
+export const guestInventory = createServerFn({ method: "POST" })
+  .validator((input: unknown) => {
+    const body = input as Record<string, unknown>;
+    const kind = body?.kind === "libvirt" ? "libvirt" as const : body?.kind === "hyper-v" ? "hyper-v" as const : null;
+    const address = typeof body?.address === "string" ? body.address.trim() : "";
+    const port = Number(body?.port);
+    const login = typeof body?.login === "string" ? body.login.trim() : "";
+    const password = typeof body?.password === "string" ? body.password : "";
+    if (!kind) throw new Error("Choose a hypervisor.");
+    if (!addressOk(address)) throw new Error("Hypervisor address is not valid.");
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Port is not valid.");
+    if (login && !/^[A-Za-z0-9._-]{1,32}$/.test(login)) throw new Error("Login is not valid.");
+    if (!passwordOk(password)) throw new Error("Password is not valid.");
+    if (password && !login) throw new Error("A password needs a login.");
+    return { kind, address, port, login, password };
+  })
+  .handler(async ({ data }) => {
+    const { listGuests } = await import("./hardware.server");
+    return listGuests(data);
+  });

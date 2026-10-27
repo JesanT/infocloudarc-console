@@ -10,6 +10,7 @@ import { placeInstance } from "@/lib/cloud/deploy";
 import { defaultPort, engineReading, engineSupported, statusFrom } from "@/lib/cloud/engine-score";
 import { readEngine } from "@/lib/cloud/engine-probe";
 import { guestAction } from "@/lib/cloud/guest";
+import { guestInventory } from "@/lib/cloud/guest-hardware";
 import { boundSite, canMutateSite, inScope, matches, siteLabel, siteOptions, type ComputeCluster, type ComputeService, type Instance, type PhysicalHost, type SiteKey, type WorkloadApp, type WorkloadDatabase } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
 import { chartPoints, currentHour, hourLabel, rollup, sampleId, type SampleKind } from "@/lib/cloud/uptime";
@@ -683,13 +684,58 @@ export function InstancesView() {
   const site = useCloud((s) => s.site);
   const query = useCloud((s) => s.query);
   const instances = useCloud((s) => s.instances);
+  const hypervisors = useCloud((s) => s.hypervisors);
+  const adopt = useCloud((s) => s.adoptGuests);
+  const flash = useCloud((s) => s.flash);
   const rows = instances.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.ip, item.os, item.kind, item.diskPath ?? ""]));
+  const hosts = hypervisors.filter((item) => inScope(role, site, item.site));
   const [selected, setSelected] = useState(rows[0]?.id ?? "");
+  const [reading, setReading] = useState(false);
   const vm = rows.find((item) => item.id === selected) ?? rows[0] ?? null;
+
+  async function readHosts() {
+    if (hosts.length === 0) {
+      flash("No hypervisor is in this view.");
+      return;
+    }
+    setReading(true);
+    const notes: string[] = [];
+    try {
+      for (const hv of hosts) {
+        try {
+          const result = await guestInventory({
+            data: { kind: hv.kind, address: hv.address, port: hv.port, login: hv.login, password: hv.password || "" },
+          });
+          if (!result.ok) {
+            notes.push(`${hv.name}: ${result.message}`);
+            continue;
+          }
+          const added = adopt({
+            hypervisorId: hv.id,
+            site: hv.site,
+            hostId: hv.hostId || null,
+            clusterName: hv.clusterName || null,
+            guests: result.guests,
+          });
+          notes.push(`${hv.name}: ${result.guests.length} on the hypervisor, ${added} new in the console.`);
+        } catch (error) {
+          notes.push(`${hv.name}: ${error instanceof Error ? error.message : "did not answer"}`);
+        }
+      }
+      flash(notes.join(" "));
+    } finally {
+      setReading(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <InstanceBoard kind="all" title="Instances" subtitle="Overview of every virtual machine in scope. Select one below to read its disks, network cards, and console from the hypervisor." />
-      <Panel title="Virtual machine" subtitle="Processors, memory, disks, ISO, and network cards are read from the hypervisor. They are not invented by the console.">
+      <Panel
+        title="Virtual machine"
+        subtitle="The list is what the console has stored. A cancelled deploy can leave a virtual machine on the hypervisor and nothing here. Read from hypervisors copies the names that are really there."
+        action={<Button variant="primary" disabled={reading || hosts.length === 0} onClick={() => void readHosts()}>{reading ? "Reading…" : "Read from hypervisors"}</Button>}
+      >
         {rows.length === 0 ? <Empty>No instances in this view.</Empty> : (
           <div className="space-y-4">
             <Field label="Instance">

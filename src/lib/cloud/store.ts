@@ -165,6 +165,7 @@ type CloudState = {
   deleteDeployTemplate: (id: string) => void;
   updateInstance: (id: string, input: { hypervisorId: string; templateId: string; imageId: string; hostId: string | null; clusterName: string | null; configPath: string; diskPath: string; swapPath: string }) => void;
   setInstanceAddress: (id: string, ip: string) => void;
+  adoptGuests: (input: { hypervisorId: string; site: SiteKey; hostId: string | null; clusterName: string | null; guests: Array<{ name: string; state: "running" | "stopped"; diskPath: string }> }) => number;
   deleteInstance: (id: string) => void;
   saveSwitch: (row: SanSwitch) => void;
   deleteSwitch: (name: string) => void;
@@ -338,6 +339,41 @@ export const useCloud = create<CloudState>((set, get) => ({
     const row = get().instances.find((item) => item.id === id);
     if (!row || !allowSite(get, row.site) || !ip || row.ip === ip) return;
     set({ instances: get().instances.map((item) => (item.id === id ? { ...item, ip } : item)) });
+  },
+  adoptGuests: (input) => {
+    let added = 0;
+    let instances = get().instances;
+    for (const guest of input.guests) {
+      const found = instances.find((item) => item.name === guest.name);
+      if (found) {
+        instances = instances.map((item) => item.id === found.id ? {
+          ...item,
+          status: guest.state,
+          hypervisorId: item.hypervisorId || input.hypervisorId,
+          diskPath: item.diskPath || guest.diskPath,
+          site: item.site,
+        } : item);
+      } else {
+        added += 1;
+        instances = [{
+          id: `vm-${guest.name}`,
+          name: guest.name,
+          site: input.site,
+          status: guest.state,
+          cpu: 0,
+          mem: 0,
+          ip: "",
+          kind: "Compute",
+          os: "Not reported",
+          hypervisorId: input.hypervisorId,
+          hostId: input.hostId,
+          clusterName: input.clusterName,
+          diskPath: guest.diskPath,
+        }, ...instances];
+      }
+    }
+    set({ instances });
+    return added;
   },
   addAsset: (input) => {
     const { role, inventory, ports, flash } = get();

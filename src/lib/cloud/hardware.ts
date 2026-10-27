@@ -137,3 +137,20 @@ export function formatMac(mac: string) {
   if (hex.length !== 12) return mac;
   return hex.toLowerCase().replace(/(.{2})(?=.)/g, "$1:");
 }
+
+export type ListedGuest = { name: string; state: "running" | "stopped"; diskPath: string };
+
+export function parseGuestList(raw: string): ListedGuest[] {
+  const guests: ListedGuest[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.startsWith("VM|")) continue;
+    const [, name, state, disk] = line.split("|");
+    if (!name || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name)) continue;
+    guests.push({
+      name,
+      state: /^running$/i.test(state ?? "") ? "running" : "stopped",
+      diskPath: disk && disk.trim() && disk.trim() !== "-" ? disk.trim() : "",
+    });
+  }
+  return guests;
+}
