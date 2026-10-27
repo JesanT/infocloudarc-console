@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useConfirm } from "@/components/confirm";
 import { Button, Empty, Field, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
 import { useCloud } from "@/lib/cloud/store";
 
@@ -33,6 +34,7 @@ export function CatalogTable<T extends object>({
   blank: () => T;
 }) {
   const flash = useCloud((s) => s.flash);
+  const { ask, dialog } = useConfirm();
   const [draft, setDraft] = useState<T | null>(null);
   const locked = Boolean(draft && rows.some((row) => row[idKey] === draft[idKey]));
 
@@ -42,6 +44,8 @@ export function CatalogTable<T extends object>({
   }
 
   return (
+    <>
+    {dialog}
     <Panel
       title={title}
       subtitle={subtitle}
@@ -65,8 +69,21 @@ export function CatalogTable<T extends object>({
               flash("Use a short name with letters, numbers, dots, or dashes.");
               return;
             }
-            onSave({ ...(draft as object), [idKey]: key } as T);
-            setDraft(null);
+            const next = { ...(draft as object), [idKey]: key } as T;
+            const save = () => {
+              onSave(next);
+              setDraft(null);
+            };
+            if (rows.some((row) => String(row[idKey]) === key)) {
+              ask({
+                title: `Save changes to ${key}?`,
+                body: "This replaces the console record. It does not change a guest or move files.",
+                confirmLabel: "Save",
+                run: save,
+              });
+              return;
+            }
+            save();
           }}
         >
           {columns.map((column) => {
@@ -132,7 +149,16 @@ export function CatalogTable<T extends object>({
                     <Td>
                       <div className="flex gap-1">
                         <Button onClick={() => setDraft(row)}>Edit</Button>
-                        <Button variant="danger" onClick={() => onDelete(String(row[idKey]))}>
+                        <Button
+                          variant="danger"
+                          onClick={() => ask({
+                            title: `Delete ${String(row[idKey])}?`,
+                            body: "This removes the console record only. It does not delete a guest or files on a hypervisor.",
+                            confirmLabel: "Delete",
+                            danger: true,
+                            run: () => onDelete(String(row[idKey])),
+                          })}
+                        >
                           Delete
                         </Button>
                       </div>
@@ -145,5 +171,6 @@ export function CatalogTable<T extends object>({
         </TableWrap>
       )}
     </Panel>
+    </>
   );
 }

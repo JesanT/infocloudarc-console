@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { CatalogTable } from "@/components/catalog-table";
+import { useConfirm } from "@/components/confirm";
 import { Trend } from "@/components/charts";
 import { Button, Empty, Field, Kpi, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
 import { appReading, defaultAppPath } from "@/lib/cloud/app-score";
@@ -178,7 +179,7 @@ export function LoadBalancersView() {
         <Kpi label="Traffic out" value={`${outbound}`} hint="Mbps across balancers" />
         <Kpi label="Connections" value={connections.toLocaleString()} hint="Active front-end sessions" />
       </div>
-      <InstanceBoard kind="Load Balancer" title="Load balancers" subtitle="Same health view as services, plus the traffic above." rows={rows} />
+      <InstanceBoard kind="Load Balancer" title="Load balancers" subtitle="These are load-balancer instances. Add, edit, and remove them under Instances → Operations. Remove asks first and does not delete the guest." rows={rows} />
     </div>
   );
 }
@@ -557,10 +558,13 @@ function DependencyTable({
   onDelete: (id: string) => void;
 }) {
   const flash = useCloud((s) => s.flash);
+  const { ask, dialog } = useConfirm();
   const [draft, setDraft] = useState<(WorkloadApp | WorkloadDatabase) | null>(null);
   const vmName = (id: string | null) => instances.find((item) => item.id === id)?.name ?? "—";
   const hostName = (id: string | null) => hosts.find((item) => item.id === id)?.name ?? "—";
   return (
+    <>
+    {dialog}
     <Panel
       title={title}
       subtitle={subtitle}
@@ -581,8 +585,21 @@ function DependencyTable({
               flash("Name and service are required.");
               return;
             }
-            onSave(draft);
-            setDraft(null);
+            const next = draft;
+            const save = () => {
+              onSave(next);
+              setDraft(null);
+            };
+            if (rows.some((row) => row.id === next.id)) {
+              ask({
+                title: `Save changes to ${next.name.trim()}?`,
+                body: "This replaces the console record. It does not change the guest.",
+                confirmLabel: "Save",
+                run: save,
+              });
+              return;
+            }
+            save();
           }}
         >
           <Field label="Name"><input className={fieldClass} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
@@ -639,7 +656,13 @@ function DependencyTable({
                     <Td>
                       <div className="flex gap-1">
                         <Button onClick={() => setDraft(row)}>Edit</Button>
-                        <Button variant="danger" onClick={() => onDelete(row.id)}>Delete</Button>
+                        <Button variant="danger" onClick={() => ask({
+                          title: `Delete ${row.name}?`,
+                          body: "This removes the console record only. It does not stop the guest.",
+                          confirmLabel: "Delete",
+                          danger: true,
+                          run: () => onDelete(row.id),
+                        })}>Delete</Button>
                       </div>
                     </Td>
                   )}
@@ -650,11 +673,12 @@ function DependencyTable({
         </TableWrap>
       )}
     </Panel>
+    </>
   );
 }
 
 export function InstancesView() {
-  return <InstanceBoard kind="all" title="Instances" subtitle="Overview of every virtual machine in scope. Power actions are under Operations." />;
+  return <InstanceBoard kind="all" title="Instances" subtitle="Overview of every virtual machine in scope. Edit and remove are under Operations. Remove asks before it drops the console row, and it does not delete the virtual machine." />;
 }
 
 export function InstanceOpsView() {
@@ -671,6 +695,7 @@ export function InstanceOpsView() {
   const update = useCloud((s) => s.updateInstance);
   const remove = useCloud((s) => s.deleteInstance);
   const flash = useCloud((s) => s.flash);
+  const { ask, dialog } = useConfirm();
   const [busy, setBusy] = useState("");
   const [name, setName] = useState("");
   const [hvId, setHvId] = useState("");
@@ -795,21 +820,29 @@ export function InstanceOpsView() {
       return;
     }
     const placed = placeInstance({ name: vm.name, hypervisor: hv, image, template: tpl, repositories: repos });
-    update(vm.id, {
-      hypervisorId: hv.id,
-      templateId: tpl.id,
-      imageId: image?.id ?? "",
-      hostId: hv.hostId || null,
-      clusterName: hv.clusterName || null,
-      configPath: placed.configPath,
-      diskPath: placed.diskPath,
-      swapPath: placed.swapPath,
+    ask({
+      title: `Save changes to ${vm.name}?`,
+      body: "This updates the console paths and the linked hypervisor. It does not move the virtual machine or its disks.",
+      confirmLabel: "Save",
+      run: () => {
+        update(vm.id, {
+          hypervisorId: hv.id,
+          templateId: tpl.id,
+          imageId: image?.id ?? "",
+          hostId: hv.hostId || null,
+          clusterName: hv.clusterName || null,
+          configPath: placed.configPath,
+          diskPath: placed.diskPath,
+          swapPath: placed.swapPath,
+        });
+        setEditId("");
+      },
     });
-    setEditId("");
   }
 
   return (
     <div className="space-y-4">
+      {dialog}
       {role === "vendor" ? (
         <Panel title="Deploy instance" subtitle="Vendor only. The template sets CPU, memory, disk, and image. The hypervisor sets where the machine file, disk, and swap are written. A timeout or a refused login is not stored as a running virtual machine.">
           {hvChoices.length === 0 || templates.length === 0 ? (
@@ -861,7 +894,7 @@ export function InstanceOpsView() {
         </Panel>
       )}
 
-      <Panel title="Operations" subtitle="Power actions use the hypervisor linked to the instance. Remove drops the console row only. Disks on the hypervisor stay where they are.">
+      <Panel title="Operations" subtitle="Power actions use the hypervisor linked to the instance. Edit and Remove both ask first. Remove drops the console row only. Disks on the hypervisor stay where they are.">
         {rows.length === 0 ? (
           <Empty>No instances in this view.</Empty>
         ) : (
@@ -911,7 +944,13 @@ export function InstanceOpsView() {
                           <Button disabled={busy === vm.name + "restart"} onClick={() => void run("restart", vm.name, vm)}>Restart</Button>
                           <Button variant="danger" disabled={busy === vm.name + "shutdown"} onClick={() => void run("shutdown", vm.name, vm)}>Shutdown</Button>
                           <Button disabled={!canMutateSite(role, site, vm.site)} onClick={() => { setEditId(vm.id); setEditHvId(vm.hypervisorId ?? ""); setEditTplId(vm.templateId ?? ""); }}>Edit</Button>
-                          <Button disabled={!canMutateSite(role, site, vm.site)} onClick={() => remove(vm.id)}>Remove</Button>
+                          <Button disabled={!canMutateSite(role, site, vm.site)} onClick={() => ask({
+                            title: `Remove ${vm.name}?`,
+                            body: "This drops the console row only. The virtual machine and its disks stay on the hypervisor.",
+                            confirmLabel: "Remove",
+                            danger: true,
+                            run: () => remove(vm.id),
+                          })}>Remove</Button>
                         </div>
                       </Td>
                     </tr>

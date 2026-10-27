@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Button, Empty, Field, Kpi, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
+import { DeploymentView } from "@/components/views/deployment";
 import { activityVisible, inScope, matches, siteLabel } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
 
@@ -16,13 +17,14 @@ export function RepositoryView() {
 
   return (
     <div className="space-y-4">
+      <DeploymentView />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Repositories" value={String(rows.length)} />
+        <Kpi label="Catalogs" value={String(rows.length)} />
         <Kpi label="Healthy" value={String(healthy)} />
         <Kpi label="Objects" value={rows.reduce((sum, item) => sum + item.objects, 0).toLocaleString("en-US")} />
         <Kpi label="Capacity" value={`${rows.reduce((sum, item) => sum + item.capacityTb, 0)} TB`} />
       </div>
-      <Panel title="Repository" subtitle="OS mirrors, golden images, packages, config, and backup catalogs. Distinct from backup storage targets.">
+      <Panel title="Catalogs" subtitle="OS mirrors, golden-image catalogs, packages, and backup catalogs. These are not the disk paths used to deploy a virtual machine. Add those with the repository, image, and VM folder forms above.">
         <div className="space-y-3">
           {rows.map((repo) => (
             <article key={repo.id} className="rounded-lg border border-line bg-inset p-3">

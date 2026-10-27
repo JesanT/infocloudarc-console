@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useConfirm } from "@/components/confirm";
 import { Button, Empty, Field, Kpi, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
 import { checkHypervisor } from "@/lib/cloud/hypervisor-probe";
 import { addressOk, cleanHypervisor, hypervisorDefaults, hypervisorUri, passwordOk, type Hypervisor, type HypervisorKind } from "@/lib/cloud/hypervisor";
@@ -40,6 +41,7 @@ export function HypervisorsView() {
   const save = useCloud((s) => s.saveHypervisor);
   const remove = useCloud((s) => s.deleteHypervisor);
   const flash = useCloud((s) => s.flash);
+  const { ask, dialog } = useConfirm();
   const choices = siteOptions(role, site);
   const home = choices[0];
   const visible = rows.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.address, item.kind, item.clusterName, item.switchName]));
@@ -85,6 +87,7 @@ export function HypervisorsView() {
 
   return (
     <div className="space-y-4">
+      {dialog}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         <Kpi label="In view" value={String(visible.length)} hint="Hypervisors" />
         <Kpi label="Hyper-V" value={String(hyperv)} hint="WinRM" />
@@ -128,8 +131,18 @@ export function HypervisorsView() {
                 flash("A password needs a login.");
                 return;
               }
-              save({ ...next, name: next.name || next.id });
-              setDraft(null);
+              const saved = { ...next, name: next.name || next.id };
+              const write = () => { save(saved); setDraft(null); };
+              if (rows.some((item) => item.id === saved.id)) {
+                ask({
+                  title: `Save changes to ${saved.name}?`,
+                  body: "This updates the console record. It does not reconfigure the hypervisor.",
+                  confirmLabel: "Save",
+                  run: write,
+                });
+                return;
+              }
+              write();
             }}
           >
             <Field label="Name">
@@ -244,7 +257,13 @@ export function HypervisorsView() {
                         <div className="flex flex-wrap gap-2">
                           <Button disabled={!allow || busy === row.id} onClick={() => void runCheck(row)}>{busy === row.id ? "Checking…" : "Check"}</Button>
                           <Button disabled={!allow} onClick={() => { setDraft(row); setNote(""); }}>Edit</Button>
-                          <Button disabled={!allow} onClick={() => remove(row.id)}>Delete</Button>
+                          <Button disabled={!allow} variant="danger" onClick={() => ask({
+                            title: `Delete ${row.name}?`,
+                            body: "This removes the hypervisor from the console. The host keeps running, and guests are not deleted.",
+                            confirmLabel: "Delete",
+                            danger: true,
+                            run: () => remove(row.id),
+                          })}>Delete</Button>
                         </div>
                       </Td>
                     </tr>
