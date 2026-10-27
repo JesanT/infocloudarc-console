@@ -17,6 +17,7 @@ import {
   RESTORE_POINTS,
   SEED_ACTIVITY,
   SERVICES,
+  SITES,
   SUBSCRIPTIONS,
   SWITCHES,
   USERS,
@@ -25,6 +26,7 @@ import {
   completeAsset,
   canMutateSite,
   inScope,
+  setSiteCatalog,
   siteLabel,
   type Activity,
   type BackupJob,
@@ -49,6 +51,7 @@ import {
   type SanSwitch,
   type SiteFilter,
   type SiteKey,
+  type SiteRecord,
   type SnmpConfig,
   type StorageArray,
   type Subscription,
@@ -113,6 +116,7 @@ type CloudState = {
   collectors: Collector[];
   hosts: PhysicalHost[];
   hypervisors: Hypervisor[];
+  sites: SiteRecord[];
   deployRepos: DeployRepository[];
   deployImages: DeployImage[];
   deployTemplates: DeployTemplate[];
@@ -157,6 +161,8 @@ type CloudState = {
   deleteHost: (id: string) => void;
   saveHypervisor: (row: Hypervisor) => void;
   deleteHypervisor: (id: string) => void;
+  saveSite: (row: SiteRecord) => void;
+  deleteSite: (id: string) => void;
   saveDeployRepo: (row: DeployRepository) => void;
   deleteDeployRepo: (id: string) => void;
   saveDeployImage: (row: DeployImage) => void;
@@ -219,6 +225,7 @@ export const useCloud = create<CloudState>((set, get) => ({
   collectors: COLLECTORS,
   hosts: PHYSICAL_HOSTS,
   hypervisors: HYPERVISORS,
+  sites: SITES.map((item) => ({ ...item })),
   deployRepos: DEPLOY_REPOS,
   deployImages: DEPLOY_IMAGES,
   deployTemplates: DEPLOY_TEMPLATES,
@@ -689,6 +696,52 @@ export const useCloud = create<CloudState>((set, get) => ({
     set({ hypervisors: get().hypervisors.filter((item) => item.id !== id) });
     get().flash(`Deleted hypervisor ${row.name}.`);
   },
+  saveSite: (row) => {
+    const { role } = get();
+    if (role === "site") {
+      get().flash("Site access cannot create sites.");
+      return;
+    }
+    const id = row.id.trim().toLowerCase();
+    const name = row.name.trim();
+    const code = row.code.trim().toUpperCase();
+    if (!/^[a-z][a-z0-9-]{0,31}$/.test(id) || id === "all" || id === "global") {
+      get().flash("Site id must start with a letter and use only letters, numbers, and dashes.");
+      return;
+    }
+    if (!name || !/^[A-Za-z0-9][A-Za-z0-9-]{0,15}$/.test(code)) {
+      get().flash("A site needs a name and a short code such as DC4.");
+      return;
+    }
+    if (get().sites.some((item) => item.id !== id && item.code.toLowerCase() === code.toLowerCase())) {
+      get().flash("That site code is already used.");
+      return;
+    }
+    set({ sites: upsert(get().sites, { id, name, code }, "id") });
+    get().flash(`Saved site ${name}.`);
+  },
+  deleteSite: (id) => {
+    if (get().role === "site") {
+      get().flash("Site access cannot delete sites.");
+      return;
+    }
+    const row = get().sites.find((item) => item.id === id);
+    if (!row) return;
+    if (get().sites.length < 2) {
+      get().flash("Keep at least one site.");
+      return;
+    }
+    const used = siteUsers(get(), id);
+    if (used) {
+      get().flash(`${row.name} is still linked to ${used}. Move or remove those records first.`);
+      return;
+    }
+    set({
+      sites: get().sites.filter((item) => item.id !== id),
+      site: get().site === id ? "all" : get().site,
+    });
+    get().flash(`Deleted site ${row.name}.`);
+  },
   saveDeployRepo: (row) => {
     if (!allowSite(get, row.site)) return;
     if (!pathOk(row.path) && row.kind !== "nas") {
@@ -849,8 +902,7 @@ export const useCloud = create<CloudState>((set, get) => ({
 function allowSite(get: () => CloudState, site: SiteKey): boolean {
   const { role, site: filter, flash } = get();
   if (!canMutateSite(role, filter, site)) {
-    const home = filter === "east" || filter === "west" || filter === "central" ? filter : "east";
-    flash(`Site access can change ${siteLabel(home)} only.`);
+    flash(`Site access can change ${siteLabel(filter)} only.`);
     return false;
   }
   return true;
@@ -867,6 +919,35 @@ function siteForCidr(cidr: string): SiteKey {
   if (cidr.startsWith("10.30.")) return "central";
   return "east";
 }
+
+function siteUsers(state: CloudState, id: string) {
+  const lists: Array<[string, { site?: string }[]]> = [
+    ["assets", state.inventory],
+    ["instances", state.instances],
+    ["hosts", state.hosts],
+    ["hypervisors", state.hypervisors],
+    ["repositories", state.deployRepos],
+    ["images", state.deployImages],
+    ["templates", state.deployTemplates],
+    ["services", state.services],
+    ["clusters", state.clusters],
+    ["backups", state.backups],
+    ["switches", state.switches],
+    ["arrays", state.arrays],
+    ["subscriptions", state.subscriptions],
+    ["content repositories", state.repositories],
+  ];
+  return lists
+    .map(([label, rows]) => {
+      const count = rows.filter((item) => item.site === id).length;
+      return count ? `${count} ${label}` : "";
+    })
+    .filter(Boolean)
+    .join(", ");
+}
+
+useCloud.subscribe((state) => setSiteCatalog(state.sites));
+setSiteCatalog(useCloud.getState().sites);
 
 function mergeAssets(
   set: (partial: Partial<CloudState>) => void,

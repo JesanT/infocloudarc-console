@@ -1,7 +1,7 @@
 import { Kpi, Panel, StatusPill, Table, TableWrap, Td, Th } from "@/components/ui";
 import { Trend } from "@/components/charts";
 import { CatalogTable } from "@/components/catalog-table";
-import { SITES, boundSite, inScope, matches, operatorVisible, policyVisible, siteLabel, siteOptions, type BackupJob, type BackupPolicy, type BackupTarget, type Operator, type RestorePoint, type SanSwitch, type StorageArray } from "@/lib/cloud/model";
+import { boundSite, inScope, matches, operatorVisible, policyVisible, siteLabel, siteOptions, type BackupJob, type BackupPolicy, type BackupTarget, type Operator, type RestorePoint, type SanSwitch, type StorageArray } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
 export { NetworkView } from "@/components/views/network";
 
@@ -346,7 +346,8 @@ export function LicensingView() {
   const role = useCloud((s) => s.role);
   const site = useCloud((s) => s.site);
   const subscriptions = useCloud((s) => s.subscriptions).filter((item) => inScope(role, site, item.site));
-  const siteRows = SITES.filter((item) => inScope(role, site, item.id)).map((item) => {
+  const sites = useCloud((s) => s.sites);
+  const siteRows = sites.filter((item) => inScope(role, site, item.id)).map((item) => {
     const mine = subscriptions.filter((sub) => sub.site === item.id);
     const status = mine.some((sub) => sub.status === "Expiring") ? "Expiring" : mine.some((sub) => sub.status === "Trial") ? "Trial" : "Active";
     return { id: item.id, label: siteLabel(item.id), status };

@@ -28,6 +28,7 @@ const CLOUD_KEYS = [
   "collectors",
   "hosts",
   "hypervisors",
+  "sites",
   "deployRepos",
   "deployImages",
   "deployTemplates",

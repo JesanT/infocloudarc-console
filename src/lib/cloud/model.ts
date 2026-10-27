@@ -1,13 +1,15 @@
-export const SITES = [
+export type SiteRecord = { id: string; name: string; code: string };
+
+export const SITES: SiteRecord[] = [
   { id: "east", name: "Site-East", code: "DC1" },
   { id: "west", name: "Site-West", code: "DC2" },
   { id: "central", name: "Site-Central", code: "DC3" },
-] as const;
+];
 
-export type SiteKey = (typeof SITES)[number]["id"];
-export type Scope = SiteKey | "global";
+export type SiteKey = string;
+export type Scope = SiteKey;
 export type Role = "vendor" | "global" | "site";
-export type SiteFilter = "all" | SiteKey;
+export type SiteFilter = SiteKey;
 
 export type Status =
   | "running"
@@ -213,17 +215,27 @@ export const ROLE_LABEL: Record<Role, string> = {
   site: "Site",
 };
 
+let siteCatalog: SiteRecord[] = SITES.map((item) => ({ ...item }));
+
+export function setSiteCatalog(sites: SiteRecord[]) {
+  siteCatalog = sites.length ? sites.map((item) => ({ ...item })) : SITES.map((item) => ({ ...item }));
+}
+
+export function listSites() {
+  return siteCatalog;
+}
+
 export function siteLabel(site: Scope | SiteFilter): string {
   if (site === "all") return "All sites";
   if (site === "global") return "Global";
-  const found = SITES.find((s) => s.id === site);
+  const found = siteCatalog.find((item) => item.id === site);
   return found ? `${found.name} (${found.code})` : site;
 }
 
 export function boundSite(role: Role, filter: SiteFilter): SiteKey | "all" {
   if (role === "site") {
-    if (filter === "east" || filter === "west" || filter === "central") return filter;
-    return "east";
+    if (filter && filter !== "all" && siteCatalog.some((item) => item.id === filter)) return filter;
+    return siteCatalog[0]?.id ?? "east";
   }
   return filter;
 }
@@ -243,8 +255,9 @@ export function canMutateSite(role: Role, filter: SiteFilter, itemSite: Scope): 
 
 export function siteOptions(role: Role, filter: SiteFilter): SiteKey[] {
   const bound = boundSite(role, filter);
-  if (bound === "east" || bound === "west" || bound === "central") return [bound];
-  return ["east", "west", "central"];
+  const ids = siteCatalog.map((item) => item.id);
+  if (bound !== "all" && role === "site") return [bound];
+  return ids;
 }
 
 export function mentionsSite(text: string, site: SiteKey): boolean {
@@ -268,7 +281,7 @@ export function policyVisible(scope: string, role: Role, filter: SiteFilter): bo
 export function activityVisible(text: string, role: Role, filter: SiteFilter): boolean {
   const bound = boundSite(role, filter);
   if (bound === "all") return true;
-  const hits = (["east", "west", "central"] as const).filter((id) => mentionsSite(text, id));
+  const hits = listSites().map((item) => item.id).filter((id) => mentionsSite(text, id));
   if (hits.length === 0) return role !== "site";
   if (role === "site") return hits.length === 1 && hits[0] === bound;
   return hits.includes(bound);
@@ -552,7 +565,7 @@ export const VIEW_TITLES: Record<string, string> = {
   licensing: "Licensing",
   inventory: "Inventory",
   hypervisors: "Hypervisors",
-  deployment: "Deployment",
+  deployment: "Configuration",
   repository: "Repository",
   subscriptions: "Subscriptions",
   reports: "Reports",

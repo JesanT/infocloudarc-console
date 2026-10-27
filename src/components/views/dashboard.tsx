@@ -146,7 +146,7 @@ export function Dashboard() {
       title: "Administration",
       rows: [
         ["hypervisors", "Hypervisors", `${hypervisors.length} registered, ${hypervisors.filter((item) => item.kind === "libvirt").length} libvirt`, hypervisors.some((item) => item.status === "Offline") ? "Warning" : "Healthy"],
-        ["deployment", "Deployment", `${templates.length} templates`, "Healthy"],
+        ["deployment", "Configuration", `${templates.length} templates`, "Healthy"],
         ["inventory", "Inventory", `${inventory.length} assets, ${offline} offline`, offline ? "Critical" : degradedAssets ? "Warning" : "Healthy"],
         ["repository", "Repository", `${repositories.length} catalogs`, repoWatch ? "Warning" : "Healthy"],
         ["subscriptions", "Subscriptions", `${licenseWatch.length} need review`, licenseWatch.length ? "Warning" : "Healthy"],

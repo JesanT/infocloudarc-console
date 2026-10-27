@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Menu, Search, X } from "lucide-react";
-import { ROLE_LABEL, SITES, VIEW_TITLES, boundSite, siteLabel, type Role, type SiteFilter, type SiteKey } from "@/lib/cloud/model";
+import { ROLE_LABEL, VIEW_TITLES, boundSite, siteLabel, type Role, type SiteFilter, type SiteKey } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
 import { View } from "@/components/views";
 import { SideNav } from "@/components/nav";
@@ -15,6 +15,7 @@ export function AppShell() {
   const query = useCloud((s) => s.query);
   const navOpen = useCloud((s) => s.navOpen);
   const notice = useCloud((s) => s.notice);
+  const sites = useCloud((s) => s.sites);
   const setView = useCloud((s) => s.setView);
   const setRole = useCloud((s) => s.setRole);
   const setSite = useCloud((s) => s.setSite);
@@ -87,7 +88,7 @@ export function AppShell() {
             onChange={(event) => setSite(event.target.value as SiteFilter)}
           >
             {role !== "site" && <option value="all">All sites</option>}
-            {SITES.filter((item) => role !== "site" || item.id === viewing).map((item) => (
+            {sites.filter((item) => role !== "site" || item.id === viewing).map((item) => (
               <option key={item.id} value={item.id}>{siteLabel(item.id)}</option>
             ))}
           </Select>
@@ -102,9 +103,9 @@ export function AppShell() {
           >
             <option value="vendor">{ROLE_LABEL.vendor}</option>
             <option value="global">{ROLE_LABEL.global}</option>
-            <option value="site:east">Site admin — East</option>
-            <option value="site:west">Site admin — West</option>
-            <option value="site:central">Site admin — Central</option>
+            {sites.map((item) => (
+              <option key={item.id} value={`site:${item.id}`}>Site admin — {item.name}</option>
+            ))}
           </Select>
         </header>
         <main className="min-h-0 flex-1 overflow-auto px-4 py-4 md:px-5">

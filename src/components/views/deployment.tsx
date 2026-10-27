@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useConfirm } from "@/components/confirm";
 import { Button, Empty, Field, Kpi, Panel, Select, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
 import { repoRoot, type DeployImage, type DeployRepository, type DeployTemplate, type ImageFormat, type RepoKind } from "@/lib/cloud/deploy";
-import { canMutateSite, inScope, matches, siteLabel, siteOptions, type Instance, type SiteKey } from "@/lib/cloud/model";
+import { boundSite, canMutateSite, inScope, matches, siteLabel, siteOptions, type Instance, type SiteKey, type SiteRecord } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
 
 function named(name: string, id: string) {
@@ -26,11 +26,91 @@ export function DeploymentView() {
         <Kpi label="Templates" value={String(templates.length)} hint="CPU, memory, disk" />
         <Kpi label="VM folders" value={String(ready)} hint={`${hypervisors.length} hypervisors`} />
       </div>
+      <Sites />
       <Repositories />
       <Images />
       <Templates />
       <VmFolders />
     </div>
+  );
+}
+
+function siteSlug(name: string) {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
+}
+
+function Sites() {
+  const role = useCloud((s) => s.role);
+  const filter = useCloud((s) => s.site);
+  const rows = useCloud((s) => s.sites);
+  const save = useCloud((s) => s.saveSite);
+  const remove = useCloud((s) => s.deleteSite);
+  const flash = useCloud((s) => s.flash);
+  const { ask, dialog } = useConfirm();
+  const [draft, setDraft] = useState<SiteRecord | null>(null);
+  const canAdd = role !== "site";
+  const visible = canAdd ? rows : rows.filter((item) => item.id === boundSite(role, filter));
+  return (
+    <>
+      {dialog}
+      <Panel
+        title="Sites"
+        subtitle="A site is a datacenter. Virtual machines, assets, hosts, hypervisors, repositories, images, and templates each belong to one site."
+        action={canAdd ? <Button variant="primary" onClick={() => setDraft({ id: "", name: "", code: "" })}>Add</Button> : undefined}
+      >
+        {draft && (
+          <form className="mb-4 grid gap-3 md:grid-cols-3" onSubmit={(event) => {
+            event.preventDefault();
+            const id = draft.id || siteSlug(draft.name);
+            if (!id) { flash("Use a site name with letters or numbers."); return; }
+            const next = { id, name: draft.name.trim(), code: draft.code.trim().toUpperCase() };
+            const saveRow = () => { save(next); setDraft(null); };
+            if (rows.some((item) => item.id === id)) {
+              ask({ title: `Save changes to ${next.name || id}?`, body: "The site id stays the same, so existing records remain linked.", confirmLabel: "Save", run: saveRow });
+              return;
+            }
+            saveRow();
+          }}>
+            <Field label="Name"><input className={fieldClass} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Site-North" /></Field>
+            <Field label="Code"><input className={fieldClass} value={draft.code} onChange={(event) => setDraft({ ...draft, code: event.target.value.toUpperCase() })} placeholder="DC4" /></Field>
+            <div className="flex items-end gap-2">
+              <Button variant="primary" type="submit">Save</Button>
+              <Button onClick={() => setDraft(null)}>Cancel</Button>
+            </div>
+          </form>
+        )}
+        {visible.length === 0 ? <Empty>No sites.</Empty> : (
+          <TableWrap>
+            <Table>
+              <thead><tr><Th>Name</Th><Th>Code</Th><Th>Id</Th>{canAdd && <Th> </Th>}</tr></thead>
+              <tbody>
+                {visible.map((item) => (
+                  <tr key={item.id}>
+                    <Td>{item.name}</Td>
+                    <Td>{item.code}</Td>
+                    <Td mono>{item.id}</Td>
+                    {canAdd && (
+                      <Td>
+                        <div className="flex gap-1">
+                          <Button onClick={() => setDraft(item)}>Edit</Button>
+                          <Button variant="danger" onClick={() => ask({
+                            title: `Delete ${item.name}?`,
+                            body: "This is refused while any asset, virtual machine, host, hypervisor, repository, image, or template still belongs to the site.",
+                            confirmLabel: "Delete",
+                            danger: true,
+                            run: () => remove(item.id),
+                          })}>Delete</Button>
+                        </div>
+                      </Td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </TableWrap>
+        )}
+      </Panel>
+    </>
   );
 }
 
