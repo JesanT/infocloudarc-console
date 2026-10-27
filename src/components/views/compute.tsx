@@ -876,7 +876,30 @@ export function InstanceOpsView() {
               className="grid gap-3 md:grid-cols-3"
               onSubmit={(event) => {
                 event.preventDefault();
-                void run("deploy", name.trim());
+                const vmName = name.trim();
+                if (!selectedHv || !selectedTpl || !preview) {
+                  flash("Choose a hypervisor and a template. Add both under Administration if the lists are empty.");
+                  return;
+                }
+                if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(vmName)) {
+                  flash("Instance name is not valid.");
+                  return;
+                }
+                if (instances.some((item) => item.name === vmName)) {
+                  flash("An instance with that name already exists.");
+                  return;
+                }
+                if (!preview.diskPath) {
+                  flash(preview.note || "This hypervisor has no disk repository.");
+                  return;
+                }
+                ask({
+                  title: `Deploy ${vmName}?`,
+                  body: `This creates a virtual machine on ${selectedHv.name}. Disk ${preview.diskPath}${preview.imagePath ? ` from ${preview.imagePath}` : ""}. Cancel if this was not intended.`,
+                  confirmLabel: "Deploy",
+                  danger: true,
+                  run: () => void run("deploy", vmName),
+                });
               }}
             >
               <Field label="Name">
