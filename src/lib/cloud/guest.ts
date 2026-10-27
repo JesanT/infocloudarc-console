@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { addressOk, passwordOk } from "@/lib/cloud/hypervisor";
 import { pathOk, type ImageFormat } from "@/lib/cloud/deploy";
 
-const ACTIONS = ["deploy", "stop", "restart", "shutdown"] as const;
+const ACTIONS = ["deploy", "stop", "restart", "shutdown", "undefine"] as const;
 const FORMATS = ["qcow2", "vhdx", "raw", "iso"] as const;
 
 export const guestAction = createServerFn({ method: "POST" })

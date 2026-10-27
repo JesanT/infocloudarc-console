@@ -10,7 +10,7 @@ import { placeInstance } from "@/lib/cloud/deploy";
 import { defaultPort, engineReading, engineSupported, statusFrom } from "@/lib/cloud/engine-score";
 import { readEngine } from "@/lib/cloud/engine-probe";
 import { guestAction } from "@/lib/cloud/guest";
-import { guestInventory } from "@/lib/cloud/guest-hardware";
+import { syncFromHypervisors } from "@/lib/cloud/reconcile";
 import { boundSite, canMutateSite, inScope, matches, siteLabel, siteOptions, type ComputeCluster, type ComputeService, type Instance, type PhysicalHost, type SiteKey, type WorkloadApp, type WorkloadDatabase } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
 import { chartPoints, currentHour, hourLabel, rollup, sampleId, type SampleKind } from "@/lib/cloud/uptime";
@@ -685,7 +685,6 @@ export function InstancesView() {
   const query = useCloud((s) => s.query);
   const instances = useCloud((s) => s.instances);
   const hypervisors = useCloud((s) => s.hypervisors);
-  const adopt = useCloud((s) => s.adoptGuests);
   const flash = useCloud((s) => s.flash);
   const rows = instances.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.ip, item.os, item.kind, item.diskPath ?? ""]));
   const hosts = hypervisors.filter((item) => inScope(role, site, item.site));
@@ -694,35 +693,9 @@ export function InstancesView() {
   const vm = rows.find((item) => item.id === selected) ?? rows[0] ?? null;
 
   async function readHosts() {
-    if (hosts.length === 0) {
-      flash("No hypervisor is in this view.");
-      return;
-    }
     setReading(true);
-    const notes: string[] = [];
     try {
-      for (const hv of hosts) {
-        try {
-          const result = await guestInventory({
-            data: { kind: hv.kind, address: hv.address, port: hv.port, login: hv.login, password: hv.password || "" },
-          });
-          if (!result.ok) {
-            notes.push(`${hv.name}: ${result.message}`);
-            continue;
-          }
-          const added = adopt({
-            hypervisorId: hv.id,
-            site: hv.site,
-            hostId: hv.hostId || null,
-            clusterName: hv.clusterName || null,
-            guests: result.guests,
-          });
-          notes.push(`${hv.name}: ${result.guests.length} on the hypervisor, ${added} new in the console.`);
-        } catch (error) {
-          notes.push(`${hv.name}: ${error instanceof Error ? error.message : "did not answer"}`);
-        }
-      }
-      flash(notes.join(" "));
+      flash(await syncFromHypervisors());
     } finally {
       setReading(false);
     }
@@ -730,10 +703,10 @@ export function InstancesView() {
 
   return (
     <div className="space-y-4">
-      <InstanceBoard kind="all" title="Instances" subtitle="Overview of every virtual machine in scope. Select one below to read its disks, network cards, and console from the hypervisor." />
+      <InstanceBoard kind="all" title="Instances" subtitle="Taken from the hypervisors linked in this console. A virtual machine that exists only here, or only on a host, is corrected when the hosts answer." />
       <Panel
         title="Virtual machine"
-        subtitle="The list is what the console has stored. A cancelled deploy can leave a virtual machine on the hypervisor and nothing here. Read from hypervisors copies the names that are really there."
+        subtitle="Processors, disks, ISO, network cards, and the console are read from the hypervisor that owns the virtual machine."
         action={<Button variant="primary" disabled={reading || hosts.length === 0} onClick={() => void readHosts()}>{reading ? "Reading…" : "Read from hypervisors"}</Button>}
       >
         {rows.length === 0 ? <Empty>No instances in this view.</Empty> : (
@@ -810,7 +783,7 @@ export function InstanceOpsView() {
         flash("An instance with that name already exists.");
         return;
       }
-      if (!preview.diskPath) {
+      if (!preview.diskPath || preview.note.includes("cannot read")) {
         flash(preview.note || "This hypervisor has no disk repository.");
         return;
       }
@@ -880,6 +853,47 @@ export function InstanceOpsView() {
     }
   }
 
+  async function forget(vm: Instance) {
+    const hv = linked(vm);
+    if (!hv) {
+      remove(vm.id);
+      return;
+    }
+    setBusy(vm.name + "undefine");
+    try {
+      const result = await guestAction({
+        data: {
+          action: "undefine",
+          kind: hv.kind,
+          name: vm.name,
+          address: hv.address,
+          port: hv.port,
+          login: hv.login,
+          password: hv.password || "",
+          memoryMb: 2048,
+          vcpu: 1,
+          diskGb: 10,
+          switchName: hv.switchName,
+          configPath: vm.configPath ?? "",
+          diskPath: vm.diskPath ?? "",
+          imagePath: "",
+          format: hv.kind === "hyper-v" ? "vhdx" : "qcow2",
+          role,
+        },
+      });
+      if (!result.ok) {
+        flash(result.message);
+        return;
+      }
+      remove(vm.id);
+      flash(`${vm.name} was removed from ${hv.name}. Disk files were left in place.`);
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "The hypervisor did not remove the virtual machine.");
+    } finally {
+      setBusy("");
+    }
+  }
+
   function saveEdit(vm: Instance) {
     const hv = hvChoices.find((item) => item.id === editHvId && item.site === vm.site) ?? hvChoices.find((item) => item.site === vm.site);
     const sameSite = templates.filter((item) => inScope(role, site, item.site) && item.site === vm.site);
@@ -935,7 +949,7 @@ export function InstanceOpsView() {
                   flash("An instance with that name already exists.");
                   return;
                 }
-                if (!preview.diskPath) {
+                if (!preview.diskPath || preview.note.includes("cannot read")) {
                   flash(preview.note || "This hypervisor has no disk repository.");
                   return;
                 }
@@ -987,7 +1001,7 @@ export function InstanceOpsView() {
         </Panel>
       )}
 
-      <Panel title="Operations" subtitle="Power actions use the hypervisor linked to the instance. Edit and Remove both ask first. Remove drops the console row only. Disks on the hypervisor stay where they are. Edit opens the hardware and console below.">
+      <Panel title="Operations" subtitle="Power and remove run on the hypervisor linked to the instance. Remove shuts the virtual machine down and undefines it. Disk files are left in place. Edit asks before it changes the console link.">
         {rows.length === 0 ? (
           <Empty>No instances in this view.</Empty>
         ) : (
@@ -1039,10 +1053,12 @@ export function InstanceOpsView() {
                           <Button disabled={!canMutateSite(role, site, vm.site)} onClick={() => { setEditId(vm.id); setEditHvId(vm.hypervisorId ?? ""); setEditTplId(vm.templateId ?? ""); }}>Edit</Button>
                           <Button disabled={!canMutateSite(role, site, vm.site)} onClick={() => ask({
                             title: `Remove ${vm.name}?`,
-                            body: "This drops the console row only. The virtual machine and its disks stay on the hypervisor.",
+                            body: hv
+                              ? `This shuts ${vm.name} down and removes it from ${hv.name}. Disk files stay on the hypervisor. The console row is removed only after the host accepts it.`
+                              : "No hypervisor is linked, so only the console row is removed.",
                             confirmLabel: "Remove",
                             danger: true,
-                            run: () => remove(vm.id),
+                            run: () => void forget(vm),
                           })}>Remove</Button>
                         </div>
                       </Td>
@@ -1081,41 +1097,39 @@ function InstanceBoard({
     );
   return (
     <WorkloadBoard
+      live
       title={title}
       subtitle={subtitle}
-      rows={source.map((item) => {
-        const scores = workloadScores(item.status, item.cpu);
-        return {
-          id: item.id,
-          name: item.name,
-          site: siteLabel(item.site),
-          status: item.status === "running" ? "Healthy" : "Offline",
-          availability: scores.availability,
-          performance: scores.performance,
-          summary: `${item.kind} · ${item.os} · ${item.ip}${item.hostId ? ` · host ${item.hostId}` : ""}`,
-        };
-      })}
+      rows={source.map((item) => ({
+        id: item.id,
+        name: item.name,
+        site: siteLabel(item.site),
+        status: item.status === "running" ? "Healthy" : "Offline",
+        availability: 0,
+        performance: 0,
+        summary: `${item.kind} · ${item.os || "Not reported"} · ${item.ip || "no address reported"}${item.diskPath ? ` · ${item.diskPath}` : ""}`,
+      }))}
     />
   );
 }
 
-function workloadScores(status: string, cpu: number) {
-  if (status === "stopped" || status === "Offline") return { availability: 0, performance: 0 };
-  if (status === "Degraded") return { availability: 98.2, performance: Math.max(40, 100 - cpu) };
-  return { availability: 99.9, performance: Math.max(8, 100 - cpu) };
-}
-
-function WorkloadBoard({ title, subtitle, rows }: { title: string; subtitle: string; rows: SummaryRow[] }) {
+function WorkloadBoard({ title, subtitle, rows, live = false }: { title: string; subtitle: string; rows: SummaryRow[]; live?: boolean }) {
   const availability = rows.length ? rows.reduce((sum, row) => sum + row.availability, 0) / rows.length : 0;
   const performance = rows.length ? rows.reduce((sum, row) => sum + row.performance, 0) / rows.length : 0;
-  const healthy = rows.filter((row) => row.status === "Healthy" || row.status === "running").length;
+  const running = rows.filter((row) => row.status === "Healthy" || row.status === "running").length;
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi label="In view" value={String(rows.length)} hint={title} />
-        <Kpi label="Healthy" value={String(healthy)} hint={`${rows.length - healthy} need attention`} />
-        <Kpi label="Availability" value={`${availability.toFixed(2)}%`} hint="Average in this view" />
-        <Kpi label="Performance" value={`${performance.toFixed(0)}%`} hint="Headroom after load" />
+        <Kpi label={live ? "Running" : "Healthy"} value={String(running)} hint={live ? "Reported by the hypervisor" : `${rows.length - running} need attention`} />
+        {live ? (
+          <Kpi label="Stopped" value={String(rows.length - running)} hint="Defined on the hypervisor, not running" />
+        ) : (
+          <>
+            <Kpi label="Availability" value={`${availability.toFixed(2)}%`} hint="Average in this view" />
+            <Kpi label="Performance" value={`${performance.toFixed(0)}%`} hint="Headroom after load" />
+          </>
+        )}
       </div>
       <Panel title={title} subtitle={subtitle}>
         {rows.length === 0 ? (
@@ -1124,7 +1138,7 @@ function WorkloadBoard({ title, subtitle, rows }: { title: string; subtitle: str
           <TableWrap>
             <Table>
               <thead>
-                <tr><Th>Name</Th><Th>Site</Th><Th>Status</Th><Th>Availability</Th><Th>Performance</Th><Th>Summary</Th></tr>
+                <tr>{live ? (<><Th>Name</Th><Th>Site</Th><Th>Status</Th><Th>Summary</Th></>) : (<><Th>Name</Th><Th>Site</Th><Th>Status</Th><Th>Availability</Th><Th>Performance</Th><Th>Summary</Th></>)}</tr>
               </thead>
               <tbody>
                 {rows.map((row) => (
@@ -1132,8 +1146,8 @@ function WorkloadBoard({ title, subtitle, rows }: { title: string; subtitle: str
                     <Td>{row.name}</Td>
                     <Td>{row.site}</Td>
                     <Td><StatusPill value={row.status} /></Td>
-                    <Td><Meter value={row.availability} /></Td>
-                    <Td><Meter value={row.performance} /></Td>
+                    {!live && <Td><Meter value={row.availability} /></Td>}
+                    {!live && <Td><Meter value={row.performance} /></Td>}
                     <Td>{row.summary}</Td>
                   </tr>
                 ))}

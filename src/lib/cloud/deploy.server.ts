@@ -5,7 +5,7 @@ import { runHyperv } from "@/lib/cloud/hyperv.server";
 import { sshInvocation } from "@/lib/cloud/ssh-auth.server";
 
 export type GuestRequest = {
-  action: "deploy" | "stop" | "restart" | "shutdown";
+  action: "deploy" | "stop" | "restart" | "shutdown" | "undefine";
   kind: HypervisorKind;
   name: string;
   address: string;
@@ -76,6 +76,7 @@ async function runLibvirt(input: GuestRequest): Promise<GuestResult> {
   let remote = `virsh -c qemu:///system destroy ${input.name}`;
   if (input.action === "shutdown") remote = `virsh -c qemu:///system shutdown ${input.name}`;
   if (input.action === "restart") remote = `virsh -c qemu:///system reboot ${input.name}`;
+  if (input.action === "undefine") remote = `virsh -c qemu:///system destroy ${input.name} || true; virsh -c qemu:///system undefine ${input.name} --nvram || virsh -c qemu:///system undefine ${input.name}`;
   if (input.action === "deploy") {
     const format = input.format === "vhdx" || input.format === "iso" ? "qcow2" : input.format;
     const disk = input.diskPath;

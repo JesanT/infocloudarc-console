@@ -166,6 +166,7 @@ type CloudState = {
   updateInstance: (id: string, input: { hypervisorId: string; templateId: string; imageId: string; hostId: string | null; clusterName: string | null; configPath: string; diskPath: string; swapPath: string }) => void;
   setInstanceAddress: (id: string, ip: string) => void;
   adoptGuests: (input: { hypervisorId: string; site: SiteKey; hostId: string | null; clusterName: string | null; guests: Array<{ name: string; state: "running" | "stopped"; diskPath: string }> }) => number;
+  reconcileHypervisor: (input: { hypervisorId: string; site: SiteKey; hostId: string | null; clusterName: string | null; guests: Array<{ name: string; state: "running" | "stopped"; diskPath: string }> }) => { added: number; removed: number };
   deleteInstance: (id: string) => void;
   saveSwitch: (row: SanSwitch) => void;
   deleteSwitch: (name: string) => void;
@@ -374,6 +375,15 @@ export const useCloud = create<CloudState>((set, get) => ({
     }
     set({ instances });
     return added;
+  },
+  reconcileHypervisor: (input) => {
+    const added = get().adoptGuests(input);
+    const names = new Set(input.guests.map((guest) => guest.name));
+    const before = get().instances;
+    const instances = before.filter((item) => item.hypervisorId !== input.hypervisorId || names.has(item.name));
+    const removed = before.length - instances.length;
+    if (removed) set({ instances });
+    return { added, removed };
   },
   addAsset: (input) => {
     const { role, inventory, ports, flash } = get();
@@ -743,7 +753,7 @@ export const useCloud = create<CloudState>((set, get) => ({
     const row = get().instances.find((item) => item.id === id);
     if (!row || !allowSite(get, row.site)) return;
     set({ instances: get().instances.filter((item) => item.id !== id) });
-    get().flash(`Removed ${row.name} from the console. Disks on the hypervisor were not deleted.`);
+    get().flash(`Removed ${row.name}.`);
   },
   saveSwitch: (row) => {
     if (!allowSite(get, row.site)) return;

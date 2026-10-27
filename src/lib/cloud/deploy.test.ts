@@ -33,6 +33,18 @@ test("a template places config, disk, and swap on the hypervisor repositories", 
   assert.equal(placed.note, "");
 });
 
+test("a Windows image path is not offered to a libvirt host", () => {
+  const placed = placeInstance({
+    name: "testvm",
+    hypervisor: { ...HYPERVISORS[0], kind: "libvirt", configRepoId: "repo-west-disk", diskRepoId: "repo-west-disk", swapRepoId: "repo-west-disk" },
+    image: DEPLOY_IMAGES[0],
+    template: DEPLOY_TEMPLATES[0],
+    repositories: DEPLOY_REPOS,
+  });
+  assert.equal(placed.imagePath, "");
+  assert.match(placed.note, /cannot read/);
+});
+
 test("a storage pool name is not treated as a disk path", () => {
   const placed = placeInstance({
     name: "app-03",

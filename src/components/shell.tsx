@@ -6,6 +6,7 @@ import { View } from "@/components/views";
 import { SideNav } from "@/components/nav";
 import { Select } from "@/components/ui";
 import { useConsolePersistence } from "@/lib/cloud/persist";
+import { syncFromHypervisors } from "@/lib/cloud/reconcile";
 
 export function AppShell() {
   const view = useCloud((s) => s.view);
@@ -26,6 +27,13 @@ export function AppShell() {
     const id = window.setInterval(() => useCloud.getState().poll(), 60_000);
     return () => window.clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (!restored) return;
+    void syncFromHypervisors().then((note) => {
+      if (note) useCloud.getState().flash(note);
+    });
+  }, [restored]);
 
   return (
     <div className="app-surface flex h-dvh text-ink">

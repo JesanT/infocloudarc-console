@@ -70,6 +70,11 @@ switch ($action) {
   'stop' { Stop-VM -Name $name @remote -TurnOff -Force }
   'shutdown' { Stop-VM -Name $name @remote -Force }
   'restart' { Restart-VM -Name $name @remote -Force }
+  'undefine' {
+    $vm = Get-VM -Name $name @remote
+    if ([string]$vm.State -eq 'Running') { Stop-VM -Name $name @remote -TurnOff -Force }
+    Remove-VM -Name $name @remote -Force
+  }
   'deploy' {
     $bytes = $memory * 1MB
     $switch = [string]$env:HV_SWITCH
@@ -116,7 +121,7 @@ export type HypervResult = {
 const EMPTY_OWNER = { source: "unconfirmed" as const, ownerNode: "", ownerGroup: "", mac: "", state: "" };
 
 export async function runHyperv(input: {
-  action: "probe" | "stop" | "restart" | "shutdown" | "deploy" | "owner";
+  action: "probe" | "stop" | "restart" | "shutdown" | "deploy" | "owner" | "undefine";
   name?: string;
   computer?: string;
   memoryMb?: number;

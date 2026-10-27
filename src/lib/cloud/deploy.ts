@@ -83,6 +83,16 @@ export function joinRepo(root: string, file: string) {
   return `${root.replace(/[\\/]+$/, "")}${sep}${name}`;
 }
 
+function windowsPath(path: string) {
+  return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
+}
+
+export function pathFits(kind: HypervisorKind, path: string) {
+  if (!path) return false;
+  if (kind === "hyper-v") return windowsPath(path);
+  return path.startsWith("/") && !windowsPath(path);
+}
+
 function usableRoot(value: string) {
   const root = value.trim();
   return pathOk(root) ? root : "";
@@ -125,23 +135,31 @@ export function placeInstance(input: {
   const diskRoot = diskRepo ? repoRoot(diskRepo) : usableRoot(input.hypervisor.storage);
   const configRoot = configRepo ? repoRoot(configRepo) : diskRoot;
   const swapRoot = swapRepo ? repoRoot(swapRepo) : "";
+  const imageRoot = imageRepo ? repoRoot(imageRepo) : "";
+  const imagePath = image && imageRoot ? joinRepo(imageRoot, image.file) : "";
+  const unreadable = Boolean(image && imagePath && !pathFits(input.hypervisor.kind, imagePath));
   const file = diskFileName(input.name, format, input.hypervisor.kind);
   const missing = [
     !diskRoot ? "disk" : "",
     !configRoot ? "config" : "",
     !swapRepo ? "swap" : "",
   ].filter(Boolean);
+  const note = unreadable
+    ? `The image is registered in ${imageRepo?.name ?? "another repository"}, which this host cannot read. Edit the image and choose a repository on this hypervisor.`
+    : missing.length
+      ? `No ${missing.join(", ")} repository on this hypervisor.`
+      : "";
   return {
     os: image?.os || "Ubuntu 22.04",
     instanceKind: template?.instanceKind || "Compute",
     vcpu: template?.vcpu || 2,
     memoryMb: template?.memoryMb || 2048,
     diskGb: template?.diskGb || 40,
-    imagePath: image && imageRepo ? joinRepo(repoRoot(imageRepo), image.file) : "",
+    imagePath: unreadable ? "" : imagePath,
     configPath: configRoot ? joinRepo(configRoot, input.hypervisor.kind === "hyper-v" ? input.name : `${input.name}.xml`) : "",
     diskPath: diskRoot ? joinRepo(diskRoot, file) : "",
     swapPath: swapRoot ? joinRepo(swapRoot, `${input.name}.swap`) : "",
     format,
-    note: missing.length ? `No ${missing.join(", ")} repository on this hypervisor.` : "",
+    note,
   };
 }
