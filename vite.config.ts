@@ -21,6 +21,33 @@ function hasGlobbedMigrations(root: string): boolean {
   }
 }
 
+function isClientAbort(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const error = value as { message?: string; code?: string; cause?: { message?: string; code?: string } };
+  const code = error.code || error.cause?.code;
+  const message = `${error.message ?? ""} ${error.cause?.message ?? ""}`;
+  return code === "ECONNRESET" || code === "EPIPE" || code === "ERR_STREAM_PREMATURE_CLOSE" || /aborted|ECONNRESET/i.test(message);
+}
+
+/** A browser reload closes the page request. That is not a server failure. */
+function quietAbortPlugin(): Plugin {
+  return {
+    name: "infocloudarc:quiet-abort",
+    apply: "serve",
+    configureServer() {
+      const marker = Symbol.for("infocloudarc.quietAbort");
+      const target = console as Console & { [key: symbol]: boolean };
+      if (target[marker]) return;
+      target[marker] = true;
+      const write = console.error.bind(console);
+      console.error = ((...args: unknown[]) => {
+        if (args.some(isClientAbort)) return;
+        write(...args);
+      }) as typeof console.error;
+    },
+  };
+}
+
 /**
  * Finish PGLite bootstrap during dev-server setup (before traffic). Vite awaits
  * async `configureServer` hooks. Production: `src/lib/db` kicks `ensureDbReady`
@@ -191,6 +218,7 @@ export default defineConfig(({ command, isPreview }) => ({
   },
   resolve: { tsconfigPaths: true },
   plugins: [
+    quietAbortPlugin(),
     pgliteBootstrapPlugin(),
     // Before tanstackStart so /auth/popup never falls through to the SPA.
     authPopupPlugin(),
