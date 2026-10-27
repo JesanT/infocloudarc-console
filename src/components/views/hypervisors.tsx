@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useConfirm } from "@/components/confirm";
-import { Button, Empty, Field, Kpi, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
+import { Button, Empty, Field, Kpi, PageHelp, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
 import { checkHypervisor } from "@/lib/cloud/hypervisor-probe";
 import { addressOk, cleanHypervisor, hypervisorDefaults, hypervisorUri, passwordOk, type Hypervisor, type HypervisorKind } from "@/lib/cloud/hypervisor";
 import { canMutateSite, inScope, matches, siteLabel, siteOptions, type SiteKey } from "@/lib/cloud/model";
@@ -88,6 +88,9 @@ export function HypervisorsView() {
   return (
     <div className="space-y-4">
       {dialog}
+      <PageHelp>
+        Register the host here before you deploy. Hyper-V is reached with WinRM. Libvirt is reached with SSH. Point each host at repositories on the same site.
+      </PageHelp>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         <Kpi label="In view" value={String(visible.length)} hint="Hypervisors" />
         <Kpi label="Hyper-V" value={String(hyperv)} hint="WinRM" />

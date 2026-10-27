@@ -540,6 +540,7 @@ export const SEED_ACTIVITY: Activity[] = [
 
 export const VIEW_TITLES: Record<string, string> = {
   dashboard: "Dashboard",
+  guide: "User guide",
   services: "Services",
   applications: "Applications",
   databases: "Databases",

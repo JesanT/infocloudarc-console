@@ -3,7 +3,8 @@ import { CatalogTable } from "@/components/catalog-table";
 import { InstanceHardware } from "@/components/views/instance-hardware";
 import { useConfirm } from "@/components/confirm";
 import { Trend } from "@/components/charts";
-import { Button, Empty, Field, Kpi, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
+import { Button, Empty, Field, Kpi, PageHelp, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
+import { SelectBox, SelectionBar, rowClass, useSelection } from "@/components/selection";
 import { appReading, defaultAppPath } from "@/lib/cloud/app-score";
 import { readApplication } from "@/lib/cloud/app-probe";
 import { placeInstance } from "@/lib/cloud/deploy";
@@ -703,6 +704,9 @@ export function InstancesView() {
 
   return (
     <div className="space-y-4">
+      <PageHelp>
+        This list is read from the hypervisors in the console. Select an instance to see disks, network cards, and the console. An address is shown only when the host reports one.
+      </PageHelp>
       <InstanceBoard kind="all" title="Instances" subtitle="Taken from the hypervisors linked in this console. A virtual machine that exists only here, or only on a host, is corrected when the hosts answer." />
       <Panel
         title="Virtual machine"
@@ -755,6 +759,7 @@ export function InstanceOpsView() {
   const preview = selectedHv && selectedTpl
     ? placeInstance({ name: name.trim() || "new-vm", hypervisor: selectedHv, image: selectedImage, template: selectedTpl, repositories: repos })
     : null;
+  const pick = useSelection(rows.map((item) => item.id));
 
   function linked(vm: Instance) {
     return hypervisors.find((item) => item.id === vm.hypervisorId) ?? null;
@@ -1002,13 +1007,36 @@ export function InstanceOpsView() {
       )}
 
       <Panel title="Operations" subtitle="Power and remove run on the hypervisor linked to the instance. Remove shuts the virtual machine down and undefines it. Disk files are left in place. Edit asks before it changes the console link.">
+        <PageHelp>
+          Deploy asks before it creates a machine. Select rows to remove more than one. Each removal is confirmed once, then each host is asked to undefine that machine.
+        </PageHelp>
         {rows.length === 0 ? (
           <Empty>No instances in this view.</Empty>
         ) : (
           <TableWrap>
+            <SelectionBar
+              count={pick.picked.length}
+              onClear={pick.clear}
+              onDelete={() => ask({
+                title: `Remove ${pick.picked.length} virtual machines?`,
+                body: "Each selected machine is shut down and removed from its hypervisor. Disk files stay. A host that refuses keeps that console row.",
+                confirmLabel: "Remove",
+                danger: true,
+                run: () => {
+                  const chosen = rows.filter((vm) => pick.picked.includes(vm.id));
+                  pick.clear();
+                  void (async () => {
+                    for (const vm of chosen) await forget(vm);
+                  })();
+                },
+              })}
+            />
             <Table>
               <thead>
-                <tr><Th>Name</Th><Th>Site</Th><Th>Status</Th><Th>Hypervisor</Th><Th>Actions</Th></tr>
+                <tr>
+                  <Th><SelectBox checked={pick.all} onChange={pick.toggleAll} label="Select all instances" /></Th>
+                  <Th>Name</Th><Th>Site</Th><Th>Status</Th><Th>Hypervisor</Th><Th>Actions</Th>
+                </tr>
               </thead>
               <tbody>
                 {rows.map((vm) => {
@@ -1018,7 +1046,8 @@ export function InstanceOpsView() {
                   const editTpls = templates.filter((item) => inScope(role, site, item.site) && item.site === vm.site);
                   const editTpl = editTpls.find((item) => item.id === editTplId) ?? editTpls[0];
                   return (
-                    <tr key={vm.id}>
+                    <tr key={vm.id} className={rowClass(pick.has(vm.id))} onClick={() => pick.toggle(vm.id)}>
+                      <Td><SelectBox checked={pick.has(vm.id)} onChange={() => pick.toggle(vm.id)} label={`Select ${vm.name}`} /></Td>
                       <Td>
                         <div className="font-medium">{vm.name}</div>
                         <div className="text-xs text-faint">{vm.kind} · {vm.os}</div>
@@ -1046,7 +1075,7 @@ export function InstanceOpsView() {
                       <Td><StatusPill value={vm.status} /></Td>
                       <Td>{hv ? hv.name : "Not linked"}</Td>
                       <Td>
-                        <div className="flex flex-wrap gap-1">
+                        <div className="flex flex-wrap gap-1" onClick={(event) => event.stopPropagation()}>
                           <Button disabled={busy === vm.name + "stop"} onClick={() => void run("stop", vm.name, vm)}>Stop</Button>
                           <Button disabled={busy === vm.name + "restart"} onClick={() => void run("restart", vm.name, vm)}>Restart</Button>
                           <Button variant="danger" disabled={busy === vm.name + "shutdown"} onClick={() => void run("shutdown", vm.name, vm)}>Shutdown</Button>

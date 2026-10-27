@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useConfirm } from "@/components/confirm";
-import { Button, Empty, Field, Kpi, Panel, Select, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
+import { SelectBox, SelectionBar, rowClass, useSelection } from "@/components/selection";
+import { Button, Empty, Field, Kpi, PageHelp, Panel, Select, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
 import { repoRoot, type DeployImage, type DeployRepository, type DeployTemplate, type ImageFormat, type RepoKind } from "@/lib/cloud/deploy";
 import { boundSite, canMutateSite, inScope, matches, siteLabel, siteOptions, type Instance, type SiteKey, type SiteRecord } from "@/lib/cloud/model";
 import { useCloud } from "@/lib/cloud/store";
@@ -20,6 +21,9 @@ export function DeploymentView() {
   const ready = hypervisors.filter((item) => item.configRepoId || item.diskRepoId).length;
   return (
     <div className="space-y-4">
+      <PageHelp>
+        A site comes first. Then a repository the hypervisor can read, an image in that repository, and a template. Virtual machines, assets, and hosts keep the site you choose on the form.
+      </PageHelp>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi label="Repositories" value={String(repos.length)} hint="Local, mapped, or NAS" />
         <Kpi label="Images" value={String(images.length)} hint="Disk or install files" />
@@ -50,6 +54,7 @@ function Sites() {
   const [draft, setDraft] = useState<SiteRecord | null>(null);
   const canAdd = role !== "site";
   const visible = canAdd ? rows : rows.filter((item) => item.id === boundSite(role, filter));
+  const pick = useSelection(visible.map((item) => item.id));
   return (
     <>
       {dialog}
@@ -81,17 +86,36 @@ function Sites() {
         )}
         {visible.length === 0 ? <Empty>No sites.</Empty> : (
           <TableWrap>
+            <SelectionBar
+              count={pick.picked.length}
+              onClear={pick.clear}
+              onEdit={pick.picked.length === 1 ? () => {
+                const row = visible.find((item) => item.id === pick.picked[0]);
+                if (row) setDraft(row);
+              } : undefined}
+              onDelete={canAdd ? () => ask({
+                title: `Delete ${pick.picked.length} sites?`,
+                body: "A site is kept when any record still belongs to it.",
+                confirmLabel: "Delete",
+                danger: true,
+                run: () => {
+                  for (const id of pick.picked) remove(id);
+                  pick.clear();
+                },
+              }) : undefined}
+            />
             <Table>
-              <thead><tr><Th>Name</Th><Th>Code</Th><Th>Id</Th>{canAdd && <Th> </Th>}</tr></thead>
+              <thead><tr><Th><SelectBox checked={pick.all} onChange={pick.toggleAll} label="Select all sites" /></Th><Th>Name</Th><Th>Code</Th><Th>Id</Th>{canAdd && <Th> </Th>}</tr></thead>
               <tbody>
                 {visible.map((item) => (
-                  <tr key={item.id}>
+                  <tr key={item.id} className={rowClass(pick.has(item.id))} onClick={() => pick.toggle(item.id)}>
+                    <Td><SelectBox checked={pick.has(item.id)} onChange={() => pick.toggle(item.id)} label={`Select ${item.name}`} /></Td>
                     <Td>{item.name}</Td>
                     <Td>{item.code}</Td>
                     <Td mono>{item.id}</Td>
                     {canAdd && (
                       <Td>
-                        <div className="flex gap-1">
+                        <div className="flex gap-1" onClick={(event) => event.stopPropagation()}>
                           <Button onClick={() => setDraft(item)}>Edit</Button>
                           <Button variant="danger" onClick={() => ask({
                             title: `Delete ${item.name}?`,
@@ -185,7 +209,7 @@ function Repositories() {
               <thead><tr><Th>Name</Th><Th>Kind</Th><Th>Site</Th><Th>Location</Th><Th> </Th></tr></thead>
               <tbody>
                 {visible.map((row) => (
-                  <tr key={row.id}>
+                  <tr key={row.id} className="hover:bg-[#faf9f8]">
                     <Td>{row.name}</Td>
                     <Td>{row.kind === "nas" ? `NAS · ${row.protocol}` : row.kind === "mapped" ? "Mapped disk" : "Local disk"}</Td>
                     <Td>{siteLabel(row.site)}</Td>
@@ -287,7 +311,7 @@ function Images() {
               <thead><tr><Th>Name</Th><Th>File</Th><Th>Repository</Th><Th>OS</Th><Th> </Th></tr></thead>
               <tbody>
                 {visible.map((row) => (
-                  <tr key={row.id}>
+                  <tr key={row.id} className="hover:bg-[#faf9f8]">
                     <Td>{row.name}</Td>
                     <Td>{row.file} · {row.format}</Td>
                     <Td>{repoName(row.repositoryId)}</Td>
@@ -384,7 +408,7 @@ function Templates() {
               <thead><tr><Th>Name</Th><Th>Image</Th><Th>Shape</Th><Th>Site</Th><Th> </Th></tr></thead>
               <tbody>
                 {visible.map((row) => (
-                  <tr key={row.id}>
+                  <tr key={row.id} className="hover:bg-[#faf9f8]">
                     <Td>{row.name}</Td>
                     <Td>{imageName(row.imageId)}</Td>
                     <Td>{row.instanceKind} · {row.vcpu} CPU · {row.memoryMb} MB · {row.diskGb} GB</Td>
@@ -481,7 +505,7 @@ function VmFolders() {
               <thead><tr><Th>Hypervisor</Th><Th>Machine files</Th><Th>VM storage</Th><Th>Swap</Th><Th> </Th></tr></thead>
               <tbody>
                 {visible.map((row) => (
-                  <tr key={row.id}>
+                  <tr key={row.id} className="hover:bg-[#faf9f8]">
                     <Td>{row.name}</Td>
                     <Td>{label(row.configRepoId)}</Td>
                     <Td>{label(row.diskRepoId)}</Td>

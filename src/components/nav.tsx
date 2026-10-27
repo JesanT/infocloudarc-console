@@ -11,6 +11,7 @@ import {
   KeyRound,
   Layers,
   LayoutDashboard,
+  BookOpen,
   Minus,
   Monitor,
   Network,
@@ -35,6 +36,7 @@ type NavNode = Leaf | Branch;
 
 const NAV: NavNode[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "guide", label: "User guide", icon: BookOpen },
   {
     id: "computing",
     label: "Computing",

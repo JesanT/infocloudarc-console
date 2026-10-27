@@ -1,5 +1,6 @@
 import type { ButtonHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
 import { tone } from "@/lib/cloud/model";
+import { useCloud } from "@/lib/cloud/store";
 
 const toneClass = {
   ok: "bg-ok/15 text-ok",
@@ -111,6 +112,16 @@ export function Th({ children }: { children?: ReactNode }) {
 
 export function Td({ children, mono = false }: { children: ReactNode; mono?: boolean }) {
   return <td className={`border-b border-line px-3 py-2 align-middle text-ink ${mono ? "font-mono text-xs" : ""}`}>{children}</td>;
+}
+
+export function PageHelp({ children }: { children: ReactNode }) {
+  const setView = useCloud((s) => s.setView);
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3 border border-[#c7e0f4] bg-[#f3f9fd] px-3 py-2 text-sm text-ink">
+      <p className="max-w-4xl leading-relaxed">{children}</p>
+      <button type="button" className="shrink-0 font-semibold text-[#0078d4]" onClick={() => setView("guide")}>User guide</button>
+    </div>
+  );
 }
 
 export function Empty({ children }: { children: ReactNode }) {

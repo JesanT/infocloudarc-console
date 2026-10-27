@@ -13,6 +13,7 @@ import {
   StorageView,
   UsersView,
 } from "@/components/views/platform";
+import { GuideView } from "@/components/views/guide";
 import { DeploymentView } from "@/components/views/deployment";
 import { HypervisorsView } from "@/components/views/hypervisors";
 import { InventoryView } from "@/components/views/inventory";
@@ -25,6 +26,8 @@ export function View({ id }: { id: string }) {
   switch (id) {
     case "dashboard":
       return <Dashboard />;
+    case "guide":
+      return <GuideView />;
     case "services":
       return <ServicesView />;
     case "applications":

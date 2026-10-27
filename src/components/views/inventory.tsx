@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Empty, Field, Kpi, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
+import { Button, Empty, Field, Kpi, PageHelp, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
 import { inScope, matches, siteLabel, siteOptions, type InventoryItem, type SiteKey } from "@/lib/cloud/model";
 import { parseCsv, templateCsv, type ImportRow } from "@/lib/cloud/fabric";
 import { getAppSubnet, scanSubnet } from "@/lib/cloud/discover";
@@ -87,6 +87,9 @@ export function InventoryView() {
 
   return (
     <div className="space-y-4">
+      <PageHelp>
+        Every asset belongs to one site. The site filter in the top bar hides the rest. Add, edit, and delete change the inventory record only.
+      </PageHelp>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi label="Assets" value={String(rows.length)} />
         <Kpi label="Online" value={String(rows.filter((item) => item.status === "Online").length)} />

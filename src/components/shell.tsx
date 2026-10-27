@@ -69,9 +69,13 @@ export function AppShell() {
             <Menu className="size-5" />
           </button>
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] font-semibold text-accent">{siteLabel(viewing)}</div>
+            <div className="truncate text-[11px] text-muted">
+              <button type="button" className="font-semibold text-[#0078d4]" onClick={() => setView("dashboard")}>Home</button>
+              <span> / {VIEW_TITLES[view] ?? "Infocloudarc"}</span>
+            </div>
             <h1 className="truncate text-base font-semibold">{VIEW_TITLES[view] ?? "Infocloudarc"}</h1>
           </div>
+          <button type="button" className="hidden h-8 items-center px-2 text-sm font-semibold text-[#0078d4] sm:inline-flex" onClick={() => setView("guide")}>Guide</button>
           <label className="relative order-last w-full sm:order-none sm:w-64">
             <Search className="pointer-events-none absolute top-2 left-2 size-4 text-faint" />
             <input

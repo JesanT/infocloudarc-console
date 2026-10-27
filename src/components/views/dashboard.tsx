@@ -1,4 +1,4 @@
-import { Kpi, Panel, StatusPill } from "@/components/ui";
+import { Kpi, PageHelp, Panel, StatusPill } from "@/components/ui";
 import { Trend } from "@/components/charts";
 import { isPolled } from "@/lib/cloud/fabric";
 import {
@@ -157,6 +157,9 @@ export function Dashboard() {
 
   return (
     <div className="space-y-4">
+      <PageHelp>
+        Create a site, register the hypervisor, add a repository and an image, then deploy. Instance overview only lists virtual machines the hosts actually have.
+      </PageHelp>
       <section className="flex flex-wrap items-center justify-between gap-3 rounded-sm border border-line bg-white px-4 py-3">
         <div>
           <div className="text-xs font-medium tracking-wide text-accent uppercase">Global status</div>
