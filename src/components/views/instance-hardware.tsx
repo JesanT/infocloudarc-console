@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useConfirm } from "@/components/confirm";
 import { Button, Empty, Field, Panel, Select, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
 import { repoRoot } from "@/lib/cloud/deploy";
@@ -41,9 +41,6 @@ export function InstanceHardware({ vm }: { vm: Instance }) {
   const [growGb, setGrowGb] = useState("25");
   const [iso, setIso] = useState("");
   const [bridge, setBridge] = useState("");
-  const [consoleText, setConsoleText] = useState("");
-  const [consoleId, setConsoleId] = useState("");
-  const screen = useRef<HTMLPreElement>(null);
   const isos = images.filter((item) => item.format === "iso");
 
   function payload() {
@@ -108,59 +105,32 @@ export function InstanceHardware({ vm }: { vm: Instance }) {
   useEffect(() => {
     setView(null);
     setNote("");
-    setConsoleText("");
     setBridge(hv?.switchName ?? "");
   }, [vm.id, hv?.switchName]);
 
-  useEffect(() => {
-    if (!consoleId) return;
-    let stop = false;
-    let offset = 0;
-    const timer = setInterval(() => {
-      void guestConsole({ data: { action: "read", id: consoleId, offset } }).then((result) => {
-        if (stop || !result || !("text" in result)) return;
-        if (result.text) {
-          offset = result.next;
-          setConsoleText((current) => (current + result.text).slice(-80000));
-          screen.current?.scrollTo(0, screen.current.scrollHeight);
-        }
-        if (result.closed) setConsoleId("");
-      }).catch(() => undefined);
-    }, 500);
-    return () => {
-      stop = true;
-      clearInterval(timer);
-    };
-  }, [consoleId]);
-
-  useEffect(() => {
-    return () => {
-      if (consoleId) void guestConsole({ data: { action: "close", id: consoleId } });
-    };
-  }, [consoleId]);
-
   async function openConsole() {
     if (!hv || hv.kind !== "libvirt") return;
+    const tab = window.open("about:blank", "_blank");
+    if (!tab) {
+      setNote("The browser blocked the console tab. Allow pop-ups for this site and try again.");
+      return;
+    }
     setBusy("console");
     try {
       const result = await guestConsole({ data: { action: "open", ...payload() } });
-      if (!result || !("id" in result) || !result.ok || !result.id) {
-        setNote("message" in result ? result.message : "The console did not open.");
+      if (!result.ok || !result.id) {
+        tab.close();
+        setNote(result.message || "The console did not open.");
         return;
       }
-      setConsoleId(result.id);
-      setConsoleText("");
-      setNote(result.message);
+      tab.location.href = `/console?session=${result.id}&name=${encodeURIComponent(vm.name)}`;
+      setNote("Console opened in a new tab.");
     } catch (error) {
+      tab.close();
       setNote(error instanceof Error ? error.message : "The console did not open.");
     } finally {
       setBusy("");
     }
-  }
-
-  function sendKey(key: string) {
-    if (!consoleId || !key) return;
-    void guestConsole({ data: { action: "write", id: consoleId, text: key } });
   }
 
   const disks = view?.disks.filter((item) => item.device === "disk") ?? [];
@@ -336,30 +306,9 @@ export function InstanceHardware({ vm }: { vm: Instance }) {
         </div>
       </Panel>
 
-      <Panel title="Console" subtitle={hv?.kind === "hyper-v" ? "Hyper-V does not give this console a serial session. Use the address once the hypervisor reports one." : "Libvirt serial console. Keys are sent to the guest. A cloud image shows a login only if its serial port has a getty."}>
+      <Panel title="Console" subtitle={hv?.kind === "hyper-v" ? "Hyper-V does not give this console a serial session. Use the address once the hypervisor reports one." : "Opens a full-page serial console in a new tab. A cloud image shows a login only if its serial port has a getty. The user in this image is ubuntu."}>
         {hv?.kind !== "libvirt" ? <Empty>No serial console for this hypervisor.</Empty> : (
-          <div className="space-y-2">
-            <div className="flex gap-2">
-              {!consoleId ? (
-                <Button variant="primary" disabled={busy === "console"} onClick={() => void openConsole()}>{busy === "console" ? "Opening…" : "Open console"}</Button>
-              ) : (
-                <Button onClick={() => { void guestConsole({ data: { action: "close", id: consoleId } }); setConsoleId(""); }}>Close console</Button>
-              )}
-            </div>
-            <pre
-              ref={screen}
-              tabIndex={0}
-              className="h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-zinc-950 p-3 font-mono text-xs text-zinc-100 outline-none"
-              onKeyDown={(event) => {
-                if (!consoleId) return;
-                if (event.key === "Enter") { event.preventDefault(); sendKey("\n"); return; }
-                if (event.key === "Backspace") { event.preventDefault(); sendKey("\u007f"); return; }
-                if (event.key === "Tab") { event.preventDefault(); sendKey("\t"); return; }
-                if (event.ctrlKey && event.key === "c") { event.preventDefault(); sendKey("\u0003"); return; }
-                if (event.key.length === 1 && !event.metaKey && !event.ctrlKey) { event.preventDefault(); sendKey(event.key); }
-              }}
-            >{consoleText || "Open the console, then click here and type."}</pre>
-          </div>
+          <Button variant="primary" disabled={busy === "console"} onClick={() => void openConsole()}>{busy === "console" ? "Opening…" : "Open console"}</Button>
         )}
       </Panel>
     </div>
