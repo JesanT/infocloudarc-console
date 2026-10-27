@@ -22,7 +22,7 @@ export function useConfirm() {
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-title"
-        className="w-full max-w-md rounded-2xl border border-line bg-white p-5 shadow-xl"
+        className="w-full max-w-md rounded-sm border border-line bg-white p-5 shadow-[0_6.4px_14.4px_rgba(0,0,0,0.13)]"
         onClick={(event) => event.stopPropagation()}
       >
         <h3 id="confirm-title" className="text-base font-medium text-ink">{pending.title}</h3>

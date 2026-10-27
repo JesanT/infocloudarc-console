@@ -48,12 +48,12 @@ export function AppShell() {
       <aside
         className={`sidebar nav-slide fixed inset-y-0 left-0 z-30 flex w-72 flex-col transition-transform duration-200 md:static md:w-64 md:translate-x-0 ${navOpen ? "translate-x-0" : "-translate-x-full"}`}
       >
-        <div className="flex items-center justify-between px-4 py-5">
+        <div className="flex items-center justify-between border-b border-line px-4 py-3">
           <div>
-            <div className="text-xs tracking-widest text-white/75 uppercase">Private cloud</div>
-            <div className="text-lg font-semibold text-white">Infocloudarc</div>
+            <div className="text-[11px] font-semibold tracking-wide text-accent uppercase">Private cloud</div>
+            <div className="text-base font-semibold text-ink">Infocloudarc</div>
           </div>
-          <button type="button" className="text-white md:hidden" aria-label="Close menu" onClick={() => setNavOpen(false)}>
+          <button type="button" className="text-ink md:hidden" aria-label="Close menu" onClick={() => setNavOpen(false)}>
             <X className="size-5" />
           </button>
         </div>
@@ -63,22 +63,21 @@ export function AppShell() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="relative flex flex-wrap items-center gap-3 border-b border-line bg-white/80 px-4 py-3 backdrop-blur-md md:px-6">
-          <span className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-gradient-to-r from-[#ffb070] via-[#e85d04] to-transparent" />
-          <button type="button" className="inline-flex size-11 items-center justify-center text-ink md:hidden" aria-label="Open menu" onClick={() => setNavOpen(true)}>
+        <header className="flex flex-wrap items-center gap-3 border-b border-line bg-white px-4 py-2 md:px-5">
+          <button type="button" className="inline-flex size-8 items-center justify-center text-ink md:hidden" aria-label="Open menu" onClick={() => setNavOpen(true)}>
             <Menu className="size-5" />
           </button>
           <div className="min-w-0 flex-1">
-            <div className="text-xs font-medium tracking-wide text-accent uppercase">{siteLabel(viewing)}</div>
-            <h1 className="truncate text-lg font-semibold">{VIEW_TITLES[view] ?? "Infocloudarc"}</h1>
+            <div className="text-[11px] font-semibold text-accent">{siteLabel(viewing)}</div>
+            <h1 className="truncate text-base font-semibold">{VIEW_TITLES[view] ?? "Infocloudarc"}</h1>
           </div>
-          <label className="relative order-last w-full sm:order-none sm:w-56">
-            <Search className="pointer-events-none absolute top-3 left-3 size-4 text-faint" />
+          <label className="relative order-last w-full sm:order-none sm:w-64">
+            <Search className="pointer-events-none absolute top-2 left-2 size-4 text-faint" />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Filter this view"
-              className="h-11 w-full rounded-md border border-line bg-white pr-3 pl-9 text-sm outline-none placeholder:text-faint sm:w-56"
+              className="h-8 w-full rounded-sm border border-[#8a8886] bg-white pr-2 pl-8 text-sm outline-none placeholder:text-faint focus:border-[#0078d4] sm:w-64"
             />
           </label>
           <Select
@@ -108,9 +107,9 @@ export function AppShell() {
             <option value="site:central">Site admin — Central</option>
           </Select>
         </header>
-        <main className="min-h-0 flex-1 overflow-auto px-4 py-5 md:px-6">
+        <main className="min-h-0 flex-1 overflow-auto px-4 py-4 md:px-5">
           {restored ? (
-            <div key={view} className="enter mx-auto max-w-6xl">
+            <div key={view} className="enter">
               <View id={view} />
             </div>
           ) : (
@@ -120,7 +119,7 @@ export function AppShell() {
       </div>
 
       {notice && (
-        <div role="status" className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-lg border border-line-strong bg-white px-4 py-2 text-sm text-ink shadow-[0_12px_30px_rgba(194,65,12,0.16)]">
+        <div role="status" className="fixed right-4 bottom-4 z-40 max-w-md rounded-sm border border-line bg-white px-3 py-2 text-sm text-ink shadow-[0_3.2px_7.2px_rgba(0,0,0,0.13)]">
           {notice}
         </div>
       )}

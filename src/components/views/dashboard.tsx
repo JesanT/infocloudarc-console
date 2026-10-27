@@ -157,7 +157,7 @@ export function Dashboard() {
 
   return (
     <div className="space-y-4">
-      <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-white px-4 py-3 shadow-[0_10px_28px_rgba(232,93,4,0.06)]">
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-sm border border-line bg-white px-4 py-3">
         <div>
           <div className="text-xs font-medium tracking-wide text-accent uppercase">Global status</div>
           <p className="mt-1 text-sm text-ink">
@@ -190,7 +190,7 @@ export function Dashboard() {
                   <span className="font-mono text-faint">{item.used}%</span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-inset">
-                  <div className="h-full rounded-full bg-gradient-to-r from-[#ffb070] to-[#e85d04]" style={{ width: `${item.used}%` }} />
+                  <div className="h-full bg-[#0078d4]" style={{ width: `${item.used}%` }} />
                 </div>
               </div>
             ))}
@@ -200,7 +200,7 @@ export function Dashboard() {
         <Panel title="Protection" subtitle="Jobs in the current view">
           <div className="flex h-2 overflow-hidden rounded-full bg-inset">
             <div className="bg-[#157a45]" style={{ width: `${jobs.length ? ((jobs.length - jobWarnings) / jobs.length) * 100 : 0}%` }} />
-            <div className="bg-[#e85d04]" style={{ width: `${jobs.length ? (jobWarnings / jobs.length) * 100 : 0}%` }} />
+            <div className="bg-[#0078d4]" style={{ width: `${jobs.length ? (jobWarnings / jobs.length) * 100 : 0}%` }} />
           </div>
           <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
             <div><dt className="text-xs text-faint">Success</dt><dd className="font-mono text-lg">{jobs.length - jobWarnings}</dd></div>

@@ -227,7 +227,7 @@ function NavBranch({
         type="button"
         onClick={() => onSelect(node.id)}
         style={pad}
-        className={`sidebar-item flex h-11 w-full items-center gap-2 rounded-md pr-3 text-left text-sm ${active ? "sidebar-item-active" : ""}`}
+        className={`sidebar-item flex h-8 w-full items-center gap-2 pr-3 text-left text-sm ${active ? "sidebar-item-active" : ""}`}
       >
         {Icon ? <Icon className="size-4 shrink-0" /> : <span className="size-4" />}
         <span className="truncate">{node.label}</span>
@@ -242,7 +242,7 @@ function NavBranch({
         aria-expanded={expanded}
         onClick={() => onToggle(node.id)}
         style={pad}
-        className="sidebar-item flex h-11 w-full items-center gap-2 rounded-md pr-2 text-left text-sm font-medium"
+        className="sidebar-item flex h-8 w-full items-center gap-2 pr-2 text-left text-sm font-semibold"
       >
         {Icon ? <Icon className="size-4 shrink-0" /> : <span className="size-4" />}
         <span className="min-w-0 flex-1 truncate">{node.label}</span>

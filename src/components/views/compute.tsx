@@ -318,7 +318,7 @@ function WorkloadUptime({
             </div>
             <div className="grid gap-3 lg:grid-cols-2">
               {cards.map((card) => (
-                <div key={card.name} className="rounded-xl border border-line p-3">
+                <div key={card.name} className="rounded-sm border border-line p-3">
                   <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
                     <h3 className="text-sm font-medium text-ink">{card.name}</h3>
                     <p className="text-xs text-muted">
@@ -1165,7 +1165,7 @@ function Meter({ value }: { value: number }) {
     <div className="min-w-24">
       <div className="font-mono text-xs">{value.toFixed(value >= 10 && value < 100 ? 1 : 0)}%</div>
       <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-inset">
-        <div className="h-full rounded-full bg-gradient-to-r from-[#ffb070] to-[#e85d04]" style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+        <div className="h-full bg-[#0078d4]" style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
       </div>
     </div>
   );

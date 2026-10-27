@@ -91,7 +91,7 @@ export function ServiceDrView({ focus }: { focus: Focus }) {
 
   return (
     <div className="space-y-4">
-      <section className="rounded-2xl border border-line bg-white px-4 py-3 shadow-[0_10px_28px_rgba(232,93,4,0.06)]">
+      <section className="rounded-sm border border-line bg-white px-4 py-3">
         <div className="text-xs font-medium tracking-wide text-accent uppercase">Service DR · {title}</div>
         <p className="mt-1 text-sm text-ink">
           Primary is whichever instance currently owns the service IP. The console asks the Hyper-V host or cluster. Nothing is installed inside the virtual machine. A failover is recorded only after that check sees the address on the standby instance.

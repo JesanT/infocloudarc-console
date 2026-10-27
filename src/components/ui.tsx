@@ -10,7 +10,7 @@ const toneClass = {
 
 export function StatusPill({ value }: { value: string }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium ${toneClass[tone(value)]}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 text-xs font-semibold ${toneClass[tone(value)]}`}>
       <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
       {value}
     </span>
@@ -31,11 +31,11 @@ export function Panel({
   className?: string;
 }) {
   return (
-    <section className={`rounded-2xl border border-line bg-white p-4 shadow-[0_10px_28px_rgba(232,93,4,0.06)] md:p-5 ${className}`}>
+    <section className={`rounded-sm border border-line bg-white p-4 ${className}`}>
       {(title || action) && (
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
-            {title && <h2 className="text-base font-medium text-ink">{title}</h2>}
+            {title && <h2 className="text-sm font-semibold text-ink">{title}</h2>}
             {subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}
           </div>
           {action}
@@ -48,10 +48,9 @@ export function Panel({
 
 export function Kpi({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-line bg-white p-4 shadow-[0_10px_28px_rgba(232,93,4,0.06)]">
-      <span className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#ffb070] to-[#e85d04]" />
-      <div className="text-xs font-medium tracking-wide text-faint uppercase">{label}</div>
-      <div className="mt-2 font-mono text-2xl font-medium text-ink tabular-nums">{value}</div>
+    <div className="rounded-sm border border-line bg-white px-4 py-3">
+      <div className="text-xs text-faint">{label}</div>
+      <div className="mt-1 text-2xl font-semibold text-ink tabular-nums">{value}</div>
       {hint && <div className="mt-1 text-xs leading-snug text-muted">{hint}</div>}
     </div>
   );
@@ -63,14 +62,14 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 
 export function Button({ variant = "ghost", className = "", type = "button", ...props }: ButtonProps) {
   const styles = {
-    primary: "bg-gradient-to-r from-[#ff8a3d] to-[#e85d04] text-white shadow-[0_8px_18px_rgba(232,93,4,0.28)] hover:opacity-95",
-    ghost: "border border-line bg-white text-ink hover:border-[#e85d04] hover:text-[#c2410c]",
-    danger: "border border-danger/40 bg-danger/10 text-danger hover:bg-danger/20",
+    primary: "border border-[#0078d4] bg-[#0078d4] text-white hover:bg-[#106ebe]",
+    ghost: "border border-[#8a8886] bg-white text-ink hover:bg-[#f3f2f1]",
+    danger: "border border-[#a4262c] bg-white text-[#a4262c] hover:bg-[#fdf6f6]",
   }[variant];
   return (
     <button
       type={type}
-      className={`inline-flex h-11 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-opacity disabled:cursor-not-allowed disabled:opacity-40 ${styles} ${className}`}
+      className={`inline-flex h-8 items-center justify-center gap-2 rounded-sm px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${styles} ${className}`}
       {...props}
     />
   );
@@ -92,7 +91,7 @@ export function Field({
 }
 
 export const fieldClass =
-  "h-11 rounded-md border border-line bg-white px-3 text-sm text-ink outline-none placeholder:text-faint";
+  "h-8 rounded-sm border border-[#8a8886] bg-white px-2 text-sm text-ink outline-none placeholder:text-faint focus:border-[#0078d4]";
 
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
   return <select {...props} className={`${fieldClass} ${props.className ?? ""}`} />;
@@ -107,11 +106,11 @@ export function Table({ children }: { children: ReactNode }) {
 }
 
 export function Th({ children }: { children?: ReactNode }) {
-  return <th className="border-b border-line px-3 py-2 text-xs font-medium tracking-wide text-faint uppercase">{children}</th>;
+  return <th className="border-b border-line bg-[#faf9f8] px-3 py-2 text-left text-xs font-semibold text-muted">{children}</th>;
 }
 
 export function Td({ children, mono = false }: { children: ReactNode; mono?: boolean }) {
-  return <td className={`border-b border-line px-3 py-3 align-middle text-ink ${mono ? "font-mono text-xs" : ""}`}>{children}</td>;
+  return <td className={`border-b border-line px-3 py-2 align-middle text-ink ${mono ? "font-mono text-xs" : ""}`}>{children}</td>;
 }
 
 export function Empty({ children }: { children: ReactNode }) {
