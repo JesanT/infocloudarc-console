@@ -152,6 +152,7 @@ function warmServerFnsPlugin(): Plugin {
   const files = [
     "src/lib/cloud/persist.ts",
     "src/lib/cloud/guest.ts",
+    "src/lib/cloud/guest-hardware.ts",
     "src/lib/cloud/hyperv.ts",
     "src/lib/cloud/hypervisor-probe.ts",
     "src/lib/cloud/app-probe.ts",

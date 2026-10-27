@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { CatalogTable } from "@/components/catalog-table";
+import { InstanceHardware } from "@/components/views/instance-hardware";
 import { useConfirm } from "@/components/confirm";
 import { Trend } from "@/components/charts";
 import { Button, Empty, Field, Kpi, Panel, Select, StatusPill, Table, TableWrap, Td, Th, fieldClass } from "@/components/ui";
@@ -678,7 +679,30 @@ function DependencyTable({
 }
 
 export function InstancesView() {
-  return <InstanceBoard kind="all" title="Instances" subtitle="Overview of every virtual machine in scope. Edit and remove are under Operations. Remove asks before it drops the console row, and it does not delete the virtual machine." />;
+  const role = useCloud((s) => s.role);
+  const site = useCloud((s) => s.site);
+  const query = useCloud((s) => s.query);
+  const instances = useCloud((s) => s.instances);
+  const rows = instances.filter((item) => inScope(role, site, item.site) && matches(query, [item.name, item.ip, item.os, item.kind, item.diskPath ?? ""]));
+  const [selected, setSelected] = useState(rows[0]?.id ?? "");
+  const vm = rows.find((item) => item.id === selected) ?? rows[0] ?? null;
+  return (
+    <div className="space-y-4">
+      <InstanceBoard kind="all" title="Instances" subtitle="Overview of every virtual machine in scope. Select one below to read its disks, network cards, and console from the hypervisor." />
+      <Panel title="Virtual machine" subtitle="Processors, memory, disks, ISO, and network cards are read from the hypervisor. They are not invented by the console.">
+        {rows.length === 0 ? <Empty>No instances in this view.</Empty> : (
+          <div className="space-y-4">
+            <Field label="Instance">
+              <Select value={vm?.id ?? ""} onChange={(event) => setSelected(event.target.value)}>
+                {rows.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.ip || "no address reported"} · {item.status}</option>)}
+              </Select>
+            </Field>
+            {vm && <InstanceHardware vm={vm} />}
+          </div>
+        )}
+      </Panel>
+    </div>
+  );
 }
 
 export function InstanceOpsView() {
@@ -894,7 +918,7 @@ export function InstanceOpsView() {
         </Panel>
       )}
 
-      <Panel title="Operations" subtitle="Power actions use the hypervisor linked to the instance. Edit and Remove both ask first. Remove drops the console row only. Disks on the hypervisor stay where they are.">
+      <Panel title="Operations" subtitle="Power actions use the hypervisor linked to the instance. Edit and Remove both ask first. Remove drops the console row only. Disks on the hypervisor stay where they are. Edit opens the hardware and console below.">
         {rows.length === 0 ? (
           <Empty>No instances in this view.</Empty>
         ) : (
@@ -961,6 +985,7 @@ export function InstanceOpsView() {
           </TableWrap>
         )}
       </Panel>
+      {rows.filter((vm) => vm.id === editId).map((vm) => <InstanceHardware key={vm.id} vm={vm} />)}
     </div>
   );
 }

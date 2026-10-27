@@ -164,6 +164,7 @@ type CloudState = {
   saveDeployTemplate: (row: DeployTemplate) => void;
   deleteDeployTemplate: (id: string) => void;
   updateInstance: (id: string, input: { hypervisorId: string; templateId: string; imageId: string; hostId: string | null; clusterName: string | null; configPath: string; diskPath: string; swapPath: string }) => void;
+  setInstanceAddress: (id: string, ip: string) => void;
   deleteInstance: (id: string) => void;
   saveSwitch: (row: SanSwitch) => void;
   deleteSwitch: (name: string) => void;
@@ -332,6 +333,11 @@ export const useCloud = create<CloudState>((set, get) => ({
       ),
     });
     get().flash(`Updated ${row.name}. Files on the hypervisor were not moved.`);
+  },
+  setInstanceAddress: (id, ip) => {
+    const row = get().instances.find((item) => item.id === id);
+    if (!row || !allowSite(get, row.site) || !ip || row.ip === ip) return;
+    set({ instances: get().instances.map((item) => (item.id === id ? { ...item, ip } : item)) });
   },
   addAsset: (input) => {
     const { role, inventory, ports, flash } = get();
